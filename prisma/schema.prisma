@@ -1,0 +1,200 @@
+// Vibo — schema de datos (SDD v1, sección 3)
+//
+// Todo lo que vive acá es propio de la plataforma. Los turnos NO se modelan:
+// siguen viviendo en Airtable (Reservas + Slots), según la decisión del punto 10
+// del documento de requerimientos.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RolUsuario {
+  CLIENTE_OWNER // dueño del complejo, login del panel cliente
+  VIBO_ADMIN // equipo de Vibo, panel admin interno
+}
+
+enum EstadoAgente {
+  ACTIVO
+  PAUSADO_MANUAL // lo pausó el dueño desde la plataforma
+  PAUSADO_LIMITE // se pausó solo por llegar al límite de conversaciones del plan
+}
+
+enum EstadoConversacion {
+  ABIERTA
+  IA_RESPONDIENDO
+  REQUIERE_ATENCION_HUMANA
+  CERRADA
+}
+
+enum RemitenteMensaje {
+  CONTACTO // el cliente final (quien escribe al WhatsApp)
+  IA
+  HUMANO // el dueño, cuando tomó control manual
+}
+
+model Cliente {
+  id        String    @id @default(cuid())
+  nombre    String
+  planId    String
+  plan      Plan      @relation(fields: [planId], references: [id])
+  usuarios  Usuario[]
+  agentes   Agente[]
+  createdAt DateTime  @default(now())
+}
+
+model Usuario {
+  id           String               @id @default(cuid())
+  email        String               @unique
+  passwordHash String
+  rol          RolUsuario
+  clienteId    String? // null si es VIBO_ADMIN
+  cliente      Cliente?             @relation(fields: [clienteId], references: [id])
+  resetTokens  PasswordResetToken[]
+  createdAt    DateTime             @default(now())
+}
+
+// Recuperación de contraseña (SDD sección 6.1): link de un solo uso.
+// Se guarda el hash del token, nunca el token en sí — si se filtra la base,
+// las filas no alcanzan para tomar una cuenta.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  usuarioId String
+  usuario   Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime? // sellado al consumirlo: es lo que garantiza el "un solo uso"
+  createdAt DateTime  @default(now())
+
+  @@index([usuarioId])
+}
+
+model Plan {
+  id                   String    @id @default(cuid())
+  nombre               String // "Starter", "Profesional", "Multi-sede" (números reales pendientes, requerimientos punto 4.2)
+  maxAgentes           Int
+  maxConversacionesMes Int
+  clientes             Cliente[]
+}
+
+model Agente {
+  id         String       @id @default(cuid())
+  clienteId  String
+  cliente    Cliente      @relation(fields: [clienteId], references: [id])
+  nombre     String // nombre del agente/sede, ej. "Club Chinda Fútbol 5"
+  deporte    String
+  estado     EstadoAgente @default(ACTIVO)
+  promptBase String       @db.Text
+
+  // Configuración de negocio que el dueño ve y edita desde la sección Agentes
+  // (requerimientos §7). Todos opcionales: no bloquean el funcionamiento del
+  // agente y las sedes dadas de alta antes de este cambio no los tienen.
+  // OJO: hoy esto se guarda en Vibo pero NO se sincroniza con n8n — el bot sigue
+  // usando su prompt de n8n. Sincronizarlo es parte de "conectar el agente real".
+  direccion           String? // dirección de la sede
+  telefonoContacto    String? // teléfono de contacto del negocio
+  tono                String? // tono del agente, ej. "cercano y breve"
+  anticipacionMinHoras Int?   // anticipación mínima para reservar, en horas
+  politicaCancelacion String? @db.Text // texto libre con la política de cancelación
+  senia               String? @db.Text // seña/adelanto si aplica
+  faq                 String? @db.Text // preguntas frecuentes / base de conocimiento
+
+  // Credenciales de integraciones — cifradas en reposo con AES-256-GCM (SDD sección 7.1).
+  // Van por fila y no en variables de entorno de Vercel porque cada agente tiene su
+  // propia base de Airtable y su propia instancia de Evolution API.
+  airtableBaseId      String
+  airtableApiKeyEnc   String  @db.Text
+  evolutionInstanceId String
+  evolutionApiUrlEnc  String  @db.Text
+  evolutionApiKeyEnc  String  @db.Text
+  n8nWorkflowId       String? // referencia informativa, n8n se administra fuera de Vibo
+
+  // Token con el que n8n autentica sus llamadas a /api/integracion/* (SDD sección 6.2).
+  // Cifrado igual que el resto de las credenciales. Nullable porque se genera al dar
+  // de alta el agente (sprint 2) y recién se consume en el sprint 4.
+  tokenIntegracionEnc String? @db.Text
+
+  // Hash SHA-256 del mismo token, para resolver una llamada entrante a su agente
+  // por índice. El cifrado con GCM usa IV aleatorio, así que el mismo token da un
+  // ciphertext distinto cada vez y no sirve para buscar; el hash sí. Se guardan
+  // los dos: el cifrado para el enmascarado del admin, el hash para la búsqueda.
+  tokenIntegracionHash String? @unique
+
+  canchas        Cancha[]
+  conversaciones Conversacion[]
+  usoMensual     UsoMensual[]
+  createdAt      DateTime       @default(now())
+}
+
+model Cancha {
+  id               String  @id @default(cuid())
+  agenteId         String
+  agente           Agente  @relation(fields: [agenteId], references: [id])
+  numero           Int // 1, 2, 3... — el backend arma "Cancha {numero}" para cruzar con Airtable
+  precio           Decimal @db.Decimal(12, 2)
+  duracionTurnoMin Int
+  horarioApertura  String // "08:00"
+  horarioCierre    String // "23:00"
+
+  @@unique([agenteId, numero])
+}
+
+model UsoMensual {
+  id                  String    @id @default(cuid())
+  agenteId            String
+  agente              Agente    @relation(fields: [agenteId], references: [id])
+  cicloInicio         DateTime
+  cicloFin            DateTime
+  conversacionesCount Int       @default(0)
+  limiteAlcanzadoEn   DateTime?
+
+  @@unique([agenteId, cicloInicio])
+}
+
+model Conversacion {
+  id               String             @id @default(cuid())
+  agenteId         String
+  agente           Agente             @relation(fields: [agenteId], references: [id])
+  contactoTelefono String
+  contactoNombre   String?
+  estado           EstadoConversacion @default(ABIERTA)
+  pausadaManual    Boolean            @default(false) // la IA no responde en ESTE chat puntual
+  ultimoMensajeAt  DateTime
+  // Cuándo el dueño vio esta conversación por última vez. Null = nunca la abrió.
+  // El filtro "no leídas" (requerimientos punto 9) compara contra ultimoMensajeAt:
+  // hay mensajes sin leer si leidaAt es null o quedó antes del último mensaje.
+  // El punto 9 lo pide y el modelo del SDD (punto 3) no lo previó.
+  leidaAt          DateTime?
+  // El cicloInicio para el que esta conversación ya fue contada en el uso del
+  // plan (sprint 5). El límite se mide "una vez por conversación nueva en el
+  // ciclo" (SDD 4.3): al llegar un mensaje del contacto se compara este campo
+  // contra el ciclo actual, y solo si difiere se incrementa el consumo. Guardar
+  // el sello acá permite un compare-and-set atómico y O(1), sin recontar
+  // mensajes en el camino caliente.
+  contadaEnCiclo   DateTime?
+  mensajes         Mensaje[]
+
+  // Una sola conversación continua por contacto y agente, como un chat de
+  // WhatsApp. Es único (no solo índice) para que el "buscar-o-crear" del
+  // registro de mensajes pueda ser un upsert atómico: sin esto, dos mensajes
+  // del mismo contacto que llegan casi juntos crearían dos conversaciones.
+  @@unique([agenteId, contactoTelefono])
+  // Para ordenar la bandeja por actividad reciente sin escanear toda la tabla.
+  @@index([agenteId, ultimoMensajeAt])
+}
+
+model Mensaje {
+  id             String           @id @default(cuid())
+  conversacionId String
+  conversacion   Conversacion     @relation(fields: [conversacionId], references: [id], onDelete: Cascade)
+  remitente      RemitenteMensaje
+  contenido      String           @db.Text
+  evolutionMsgId String? // id del mensaje en Evolution API, para trazabilidad
+  createdAt      DateTime         @default(now())
+
+  @@index([conversacionId, createdAt])
+}
