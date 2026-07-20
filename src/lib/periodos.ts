@@ -7,7 +7,7 @@
  * el KPI de hoy quedaría vacío justo en el horario pico de una cancha de pádel.
  */
 
-import { ZONA_HORARIA, type FechaCalendario } from "@/lib/airtable/tipos";
+import { ZONA_HORARIA, diaDeLaSemana, type FechaCalendario } from "@/lib/airtable/tipos";
 import type { Periodo } from "@/lib/kpis";
 
 /** La fecha de calendario de hoy, en Argentina. */
@@ -33,7 +33,7 @@ export function esClaveRango(valor: unknown): valor is ClaveRango {
   return valor === "hoy" || valor === "semana" || valor === "mes";
 }
 
-function sumarDias(fecha: FechaCalendario, dias: number): FechaCalendario {
+export function sumarDias(fecha: FechaCalendario, dias: number): FechaCalendario {
   // Se opera en UTC porque la fecha ya es "de calendario", sin zona: en UTC no
   // hay saltos de horario de verano, así que un día siempre son 24 horas.
   const base = Date.parse(`${fecha}T00:00:00Z`);
@@ -114,4 +114,24 @@ export function rangoCompleto(actual: Periodo, anterior: Periodo): Periodo {
 /** Si una fecha cae dentro del período (ambos extremos incluidos). */
 export function dentroDe(fecha: FechaCalendario, periodo: Periodo): boolean {
   return fecha >= periodo.desde && fecha <= periodo.hasta;
+}
+
+/**
+ * El lunes de la semana que contiene a `fecha`.
+ *
+ * Semana de lunes a domingo, no de domingo a sábado: es como se lee una grilla
+ * de turnos de un complejo, donde el fin de semana va junto al final y no
+ * partido entre las dos puntas.
+ */
+export function inicioDeSemana(fecha: FechaCalendario): FechaCalendario {
+  const dia = diaDeLaSemana(fecha);
+  if (dia === null) return fecha;
+  // getUTCDay da 0 = Domingo; para una semana que arranca el lunes, el domingo
+  // está a 6 días del inicio, no a -1.
+  return sumarDias(fecha, dia === 0 ? -6 : 1 - dia);
+}
+
+/** Valida una fecha de calendario que llega por querystring. */
+export function esFechaCalendario(valor: unknown): valor is FechaCalendario {
+  return typeof valor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(valor);
 }

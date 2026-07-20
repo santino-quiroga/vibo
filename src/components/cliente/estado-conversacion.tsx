@@ -9,19 +9,19 @@ import { cn } from "@/lib/utils";
  * respondiendo". ABIERTA y CERRADA no llevan etiqueta: son el reposo, y marcarlo
  * sería ruido en una bandeja que puede tener muchas filas.
  *
- * Sin verde ni ámbar, igual que el resto: el rojo de peligro (#7A1024) marca lo
- * que necesita al humano; el rojo de marca, lo que está andando solo.
+ * El rojo de marca marca lo que reclama al humano — es uno de los pocos usos
+ * permitidos como indicador importante. La IA trabajando es informativo, así
+ * que va en azul: es un estado normal del sistema, no algo que atender.
  */
 
 const ESTADOS: Partial<Record<EstadoConversacion, { texto: string; clase: string }>> = {
-  // Rojo solo para lo que reclama al humano; la IA trabajando es un ticket neutro.
   REQUIERE_ATENCION_HUMANA: {
     texto: "Requiere atención",
-    clase: "bg-vibo-rojo text-vibo-blanco",
+    clase: "bg-vibo-rojo-suave text-vibo-rojo",
   },
   IA_RESPONDIENDO: {
     texto: "IA respondiendo",
-    clase: "bg-vibo-negro text-vibo-blanco",
+    clase: "bg-info-suave text-info",
   },
 };
 

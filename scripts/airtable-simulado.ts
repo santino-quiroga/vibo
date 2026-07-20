@@ -18,13 +18,68 @@
 
 import { createServer } from "node:http";
 
+import { TABLA } from "../src/lib/airtable/campos";
+
 const PUERTO = Number(process.env.PUERTO ?? 8976);
 
 /** Un complejo de pádel de verdad: 3 canchas, turnos de 90', de 8 a 23. */
 const HORAS = ["08:00", "09:30", "11:00", "14:00", "15:30", "17:00", "18:30", "20:00", "21:30"];
 const CANCHAS = ["Cancha 1", "Cancha 2", "Cancha 3"];
 
+/**
+ * Las opciones de los single/multi-select, para poder rechazar lo que no existe.
+ *
+ * Airtable con `typecast: false` devuelve 422 si un valor no coincide con
+ * ninguna opción — y eso NO es un detalle: es la garantía que el SDD (§3) pide
+ * para que un valor mal formado falle en vez de crear una opción "inventada" y
+ * ensuciar la tabla en silencio. Sin esto acá, el simulador aceptaba cualquier
+ * cosa y esa garantía no se podía probar.
+ *
+ * El vocabulario de estados se elige con VOCABULARIO_ESTADOS porque los dos que
+ * existen en la realidad no coinciden (ver ETIQUETAS_ESCRITURA en campos.ts):
+ *   - "doc"  → el del documento §8.1: "Pendiente de seña"
+ *   - "real" → el de la base de Padel AI: "Pendiente" / "Señada"
+ * Poder levantar el simulador con uno u otro es lo que permite verificar que
+ * una escritura funcione contra los dos.
+ */
+const VOCABULARIO_ESTADOS = process.env.VOCABULARIO_ESTADOS === "real" ? "real" : "doc";
+
+const ESTADOS_VALIDOS =
+  VOCABULARIO_ESTADOS === "real"
+    ? ["Confirmada", "Cancelada", "Pendiente", "Señada"]
+    : ["Confirmada", "Cancelada", "Pendiente de seña"];
+
+/** La etiqueta de "pendiente" del vocabulario elegido, para generar los datos. */
+const ETIQUETA_PENDIENTE =
+  VOCABULARIO_ESTADOS === "real" ? "Pendiente" : "Pendiente de seña";
+
 const DIAS_TODOS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+/** Qué campos son select, y qué opciones aceptan. */
+const OPCIONES: Record<string, string[]> = {
+  Estado: ESTADOS_VALIDOS,
+  Cancha: CANCHAS,
+  "Dias Activos": DIAS_TODOS,
+};
+
+/**
+ * Valida los campos de select de una escritura, como haría Airtable con
+ * `typecast: false`. Devuelve el mensaje de error, o null si está todo bien.
+ */
+function validarOpciones(fields: Record<string, unknown>): string | null {
+  for (const [campo, valor] of Object.entries(fields)) {
+    const validas = OPCIONES[campo];
+    if (!validas || valor === undefined || valor === null) continue;
+
+    for (const v of Array.isArray(valor) ? valor : [valor]) {
+      if (typeof v !== "string") continue;
+      if (!validas.includes(v)) {
+        return `Insufficient permissions to create new select option "${v}" in field "${campo}"`;
+      }
+    }
+  }
+  return null;
+}
 
 type Registro = { id: string; fields: Record<string, unknown> };
 
@@ -69,7 +124,7 @@ function generarReservas() {
         n++;
         // 1 de cada 10 se cancela, 1 de cada 8 queda pendiente de seña.
         const r = Math.random();
-        const estado = r < 0.1 ? "Cancelada" : r < 0.225 ? "Pendiente de seña" : "Confirmada";
+        const estado = r < 0.1 ? "Cancelada" : r < 0.225 ? ETIQUETA_PENDIENTE : "Confirmada";
 
         reservas.push({
           id: `recRES${String(n).padStart(4, "0")}`,
@@ -140,7 +195,10 @@ const servidor = createServer((req, res) => {
     metodo === "PATCH" ? decodeURIComponent(partes[partes.length - 2] ?? "") : tabla;
   const recordIdPath = metodo === "PATCH" ? decodeURIComponent(partes[partes.length - 1] ?? "") : null;
 
-  const fuente = nombreTabla === "Reservas" ? reservas : nombreTabla === "Slots" ? slots : null;
+  // Los nombres salen de TABLA para no volver a desincronizarse: la tabla de
+  // horarios se llama "Configuracion" en las bases reales, no "Slots".
+  const fuente =
+    nombreTabla === TABLA.reservas ? reservas : nombreTabla === TABLA.slots ? slots : null;
   if (!fuente) {
     return responder(404, {
       error: { type: "TABLE_NOT_FOUND", message: `Table "${nombreTabla}" not found` },
@@ -159,6 +217,15 @@ const servidor = createServer((req, res) => {
         return responder(400, { error: { type: "INVALID_JSON", message: "body no es JSON" } });
       }
       const fields = datos.fields ?? {};
+
+      // typecast: false → una opción que no existe es 422, no una opción nueva.
+      const invalido = validarOpciones(fields);
+      if (invalido) {
+        console.log(`  ! ${nombreTabla}: 422 ${invalido}`);
+        return responder(422, {
+          error: { type: "INVALID_MULTIPLE_CHOICE_OPTIONS", message: invalido },
+        });
+      }
 
       if (metodo === "POST") {
         contadorRegistros++;
@@ -203,5 +270,7 @@ const servidor = createServer((req, res) => {
 servidor.listen(PUERTO, () => {
   console.log(`Airtable simulado en http://localhost:${PUERTO}`);
   console.log(`  ${reservas.length} reservas, ${slots.length} slots, ${CANCHAS.length} canchas`);
+  console.log(`  estados (${VOCABULARIO_ESTADOS}): ${ESTADOS_VALIDOS.join(" / ")}`);
+  console.log(`  VOCABULARIO_ESTADOS=real levanta el simulador con el vocabulario de la base de Padel AI`);
   console.log(`\nApuntá la app con:  AIRTABLE_API_URL=http://localhost:${PUERTO} npm run dev\n`);
 });

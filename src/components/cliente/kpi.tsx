@@ -1,39 +1,53 @@
+import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 
 /**
  * Un KPI de Inicio (punto 6).
  *
- * `nota` es para decir de dónde sale el número o por qué no está. Los cuatro
- * KPIs son estimaciones sobre datos de terceros, y un número grande sin
- * contexto invita a confiar más de lo que corresponde — sobre todo "ingresos
- * estimados", que el propio punto 6 aclara que no reemplaza la facturación.
+ * El número es el elemento visual más importante de la pantalla: 40px, peso
+ * 700, y todo lo demás alrededor en gris. El rótulo va arriba y chico; la
+ * variación, abajo, como un chip discreto.
+ *
+ * `nota` dice de dónde sale el número o por qué no está. Los cuatro KPIs son
+ * estimaciones sobre datos de terceros, y un número grande sin contexto invita
+ * a confiar más de lo que corresponde — sobre todo "ingresos estimados", que el
+ * propio punto 6 aclara que no reemplaza la facturación.
  */
 export function Kpi({
   titulo,
   valor,
   variacion,
+  periodo,
   nota,
 }: {
   titulo: string;
   valor: string;
   variacion?: number | null;
+  /** Contexto temporal corto, ej. "últimos 30 días". */
+  periodo?: string;
   nota?: string;
 }) {
+  const hayPie = (variacion !== undefined && variacion !== null) || Boolean(periodo);
+
   return (
-    <div className="tarjeta p-5">
-      <h3 className="etiqueta text-neutral-500">{titulo}</h3>
+    <div className="tarjeta flex flex-col p-6">
+      <h3 className="text-[13px] font-medium text-neutral-500">{titulo}</h3>
 
-      {/* Fraunces (font-serif), reservada para los números grandes de KPI. El
-          número es lo primero que se lee: grande, con aire arriba. */}
-      <p className="mt-3 font-serif text-3xl leading-none font-semibold tracking-tight tabular-nums">
-        {valor}
-      </p>
+      <p className="t-metrica text-foreground mt-4">{valor}</p>
 
-      {variacion !== undefined && variacion !== null && (
-        <Variacion valor={variacion} />
+      {hayPie && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {variacion !== undefined && variacion !== null && (
+            <Variacion valor={variacion} />
+          )}
+          {periodo && <span className="text-xs text-neutral-400">{periodo}</span>}
+        </div>
       )}
 
-      {nota && <p className="mt-3 text-xs leading-snug text-neutral-500">{nota}</p>}
+      {nota && (
+        <p className="mt-4 text-xs leading-relaxed text-neutral-400">{nota}</p>
+      )}
     </div>
   );
 }
@@ -41,25 +55,29 @@ export function Kpi({
 /**
  * La variación contra el período anterior (punto 6).
  *
- * Sin verde ni rojo semáforo: el rojo de la marca es el color de acento, no el
- * de "mal", y usarlo acá chocaría con el #7A1024 que sí significa peligro.
- * La flecha y el signo ya dicen para dónde fue.
+ * Verde y ámbar en vez de verde y rojo: el rojo es el color de identidad de la
+ * marca, y usarlo para "bajó" lo convertiría en un semáforo además de chocar
+ * con el rojo de la navegación activa. La flecha acompaña al color, así que el
+ * dato no depende sólo del tono.
  */
 function Variacion({ valor }: { valor: number }) {
-  const subio = valor > 0;
   const plano = Math.abs(valor) < 0.005;
-  const texto = plano
-    ? "Sin cambios vs. período anterior"
-    : `${subio ? "▲" : "▼"} ${Math.abs(Math.round(valor * 100))}% vs. período anterior`;
+  const subio = valor > 0;
+  const pct = Math.abs(Math.round(valor * 100));
+
+  const Icono = plano ? Minus : subio ? ArrowUpRight : ArrowDownRight;
 
   return (
-    <p
+    <span
       className={cn(
-        "mt-1 text-xs tabular-nums",
-        plano ? "text-neutral-500" : "text-vibo-negro font-medium",
+        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium tabular-nums",
+        plano && "bg-neutral-100 text-neutral-500",
+        !plano && subio && "bg-exito-suave text-exito",
+        !plano && !subio && "bg-warning-suave text-warning",
       )}
     >
-      {texto}
-    </p>
+      <Icono className="size-3.5" strokeWidth={2} />
+      {plano ? "Sin cambios" : `${subio ? "+" : "−"}${pct}%`}
+    </span>
   );
 }

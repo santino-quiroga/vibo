@@ -17,6 +17,8 @@ import { requerirViboAdmin } from "@/lib/dal";
 import { CanchasForm } from "@/components/canchas-form";
 import { guardarCanchasAction } from "@/app/admin/actions";
 
+import { ActivarAgenteForm } from "./activar-agente-form";
+import { ReactivarAgenteForm } from "./reactivar-agente-form";
 import { EditarAgenteForm } from "./editar-agente-form";
 import { RegenerarTokenForm } from "./regenerar-token-form";
 
@@ -110,6 +112,36 @@ export default async function AgenteDetallePage({
       </header>
 
       <div className="space-y-6">
+        {(agente.estado === "PAUSADO_LIMITE" || agente.estado === "PAUSADO_POR_PAGO") && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Agente pausado</CardTitle>
+              <CardDescription>
+                Lo pausó el sistema. Se puede levantar a mano sin esperar al cron
+                diario.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ReactivarAgenteForm agenteId={agente.id} motivo={agente.estado} />
+            </CardContent>
+          </Card>
+        )}
+
+        {agente.estado === "EN_CONFIGURACION" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Activar este agente</CardTitle>
+              <CardDescription>
+                Pasa de «en configuración» a «activo». Es el momento en que el
+                bot empieza a atender clientes reales.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ActivarAgenteForm agenteId={agente.id} />
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Credenciales guardadas</CardTitle>

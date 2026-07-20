@@ -2,29 +2,17 @@ import type { Metadata } from "next";
 
 import { AvisoDegradado } from "@/components/cliente/aviso-degradado";
 import { BarraFiltros } from "@/components/cliente/barra-filtros";
-import { EstadoTurno } from "@/components/cliente/estado-turno";
+import { FiltroCancha } from "@/components/cliente/filtro-cancha";
+import { TablaTurnos } from "@/components/cliente/tabla-turnos";
 import { TurnosTabs } from "@/components/cliente/turnos-tabs";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatearFechaCorta, formatearHora } from "@/lib/airtable/tipos";
-import { datosDeTurnos, resolverAlcance } from "@/lib/cliente/datos";
+import { datosDeTurnos, resolverAlcance, sedesParaAlta } from "@/lib/cliente/datos";
 import { requerirClienteOwner } from "@/lib/dal";
-import { esClaveRango, type ClaveRango } from "@/lib/periodos";
+import { esClaveRango, hoyEnArgentina, type ClaveRango } from "@/lib/periodos";
+
+import { NuevoTurnoForm } from "./nuevo-turno-form";
 
 export const metadata: Metadata = { title: "Turnos | Vibo" };
-
-const moneda = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  maximumFractionDigits: 0,
-});
 
 export default async function TurnosPage({
   searchParams,
@@ -36,24 +24,34 @@ export default async function TurnosPage({
   const params = await searchParams;
   const rango: ClaveRango = esClaveRango(params.rango) ? params.rango : "semana";
 
-  const [alcance, datos] = await Promise.all([
+  const [alcance, datos, sedes] = await Promise.all([
     resolverAlcance(params.sede),
     datosDeTurnos(rango, params.sede),
+    sedesParaAlta(),
   ]);
 
   // El filtro por cancha se aplica en memoria: los turnos ya están traídos y
   // pedirle a Airtable un filtro más sería otro request contra su rate limit
   // para recortar una lista que ya tenemos.
-  const turnos = params.cancha
-    ? datos.turnos.filter((t) => t.cancha === params.cancha)
+  //
+  // Sólo se acepta una cancha que exista en los datos: si llega cualquier cosa
+  // por la URL, se muestra todo en vez de una lista vacía inexplicable.
+  const canchaActual =
+    params.cancha && datos.canchasDisponibles.includes(params.cancha)
+      ? params.cancha
+      : null;
+
+  const turnos = canchaActual
+    ? datos.turnos.filter((t) => t.cancha === canchaActual)
     : datos.turnos;
 
   const variasSedes = !alcance.seleccionado && alcance.agentes.length > 1;
+  const sede = alcance.seleccionado?.id ?? null;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-bold tracking-tight">Turnos</h1>
+        <h1 className="t-pagina">Turnos</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Las reservas que tomó tu agente, sin que tengas que salir de Vibo.
         </p>
@@ -72,11 +70,26 @@ export default async function TurnosPage({
         </Card>
       ) : (
         <>
-          <BarraFiltros
-            agentes={alcance.agentes}
-            sedeActual={alcance.seleccionado?.id ?? null}
-            rangoActual={rango}
-            accion="/dashboard/turnos"
+          <div className="flex flex-wrap items-center gap-3">
+            <BarraFiltros
+              rangoActual={rango}
+              accion="/dashboard/turnos"
+              sedeActual={sede}
+              extras={{ cancha: canchaActual }}
+            />
+            <FiltroCancha
+              canchas={datos.canchasDisponibles}
+              canchaActual={canchaActual}
+              accion="/dashboard/turnos"
+              sedeActual={sede}
+              extras={{ rango }}
+            />
+          </div>
+
+          <NuevoTurnoForm
+            sedes={sedes}
+            sedeElegida={sede}
+            hoy={hoyEnArgentina()}
           />
 
           <AvisoDegradado fallos={datos.fallos} descartes={datos.descartes} />
@@ -85,7 +98,9 @@ export default async function TurnosPage({
             <Card>
               <CardContent className="py-10 text-center">
                 <p className="text-sm text-neutral-500">
-                  No hay turnos en este período.
+                  {canchaActual
+                    ? `No hay turnos de ${canchaActual} en este período.`
+                    : "No hay turnos en este período."}
                 </p>
               </CardContent>
             </Card>
@@ -94,82 +109,10 @@ export default async function TurnosPage({
               <CardContent className="p-0">
                 {/* La tabla scrollea adentro de su caja: nunca empuja el ancho
                     de la página, que es lo que rompe la lectura en el celular. */}
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Cuándo</TableHead>
-                        <TableHead>Contacto</TableHead>
-                        <TableHead>Cancha</TableHead>
-                        {variasSedes && <TableHead>Sede</TableHead>}
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="text-right">Precio</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {turnos.map((turno) => (
-                        <TableRow key={turno.recordId}>
-                          <TableCell className="whitespace-nowrap">
-                            <span className="font-medium">
-                              {formatearFechaCorta(turno.fecha)}
-                            </span>
-                            <span className="ml-2 font-mono text-neutral-500">
-                              {turno.horaInicioMin !== null
-                                ? formatearHora(turno.horaInicioMin)
-                                : "—"}
-                            </span>
-                          </TableCell>
-
-                          <TableCell>
-                            <span className="block">{turno.nombre ?? "Sin nombre"}</span>
-                            {turno.telefono && (
-                              <span className="block font-mono text-xs text-neutral-500">
-                                {turno.telefono}
-                              </span>
-                            )}
-                          </TableCell>
-
-                          <TableCell className="whitespace-nowrap">
-                            {turno.cancha ?? "—"}
-                          </TableCell>
-
-                          {variasSedes && (
-                            <TableCell className="whitespace-nowrap text-neutral-500">
-                              {turno.agenteNombre}
-                            </TableCell>
-                          )}
-
-                          <TableCell>
-                            <EstadoTurno estado={turno.estado} />
-                          </TableCell>
-
-                          <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
-                            {turno.precio !== null ? (
-                              moneda.format(turno.precio)
-                            ) : (
-                              // No es "$0": es que nadie le puso precio a esa
-                              // cancha en Vibo. Mostrar cero sería mentir.
-                              <span
-                                className="text-neutral-400"
-                                title="La cancha de este turno no tiene precio cargado"
-                              >
-                                sin precio
-                              </span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                <TablaTurnos turnos={turnos} variasSedes={variasSedes} />
               </CardContent>
             </Card>
           )}
-
-          <p className="text-xs text-neutral-500">
-            Cancelar y reprogramar turnos desde acá llega en el próximo sprint.
-            Por ahora es una vista de lectura.
-          </p>
         </>
       )}
     </div>

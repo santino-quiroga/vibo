@@ -13,7 +13,16 @@
 
 export const TABLA = {
   reservas: "Reservas",
-  slots: "Slots",
+  /**
+   * Los horarios disponibles. El doc de requerimientos (8.0 y 8.1) la llama
+   * "Slots", pero en las bases reales la tabla se llama "Configuracion" — se
+   * verificó contra la Meta API de la base del primer cliente. El nombre de acá
+   * es el que manda, porque es el que la API matchea literal.
+   *
+   * Si algún cliente la tuviera con otro nombre, esto pasa a ser un campo del
+   * Agente en vez de una constante. Hoy no hace falta.
+   */
+  slots: "Configuracion",
 } as const;
 
 export const CAMPO_RESERVA = {
@@ -55,18 +64,64 @@ export const ESTADO_AIRTABLE = {
 
 export type EstadoReserva = keyof typeof ESTADO_AIRTABLE;
 
-/** Invertido, para leer lo que viene de Airtable. */
-const DESDE_AIRTABLE = new Map<string, EstadoReserva>(
-  Object.entries(ESTADO_AIRTABLE).map(([clave, etiqueta]) => [
-    etiqueta,
-    clave as EstadoReserva,
-  ]),
-);
+/**
+ * Cómo se lee lo que viene de Airtable.
+ *
+ * No es el inverso exacto de ESTADO_AIRTABLE porque las bases reales no usan
+ * las mismas etiquetas que el relevamiento del punto 8.1. La base del primer
+ * cliente tiene el single select en "Pendiente / Confirmada / Señada /
+ * Cancelada" — verificado contra la Meta API el 2026-07-18.
+ *
+ * La traducción la decidió el cliente:
+ *   - "Pendiente" -> PENDIENTE_SENIA: el turno está tomado pero no pagado, así
+ *     que cuenta como turno reservado y NO como ingreso.
+ *   - "Señada" -> CONFIRMADA: ya pagó la seña, así que cuenta también como
+ *     ingreso estimado.
+ *
+ * Se dejan además las etiquetas del doc, para una base que sí las use. Un
+ * estado que no esté acá se lee como null, y entonces el turno no suma a
+ * ningún KPI — por eso esta tabla tiene que cubrir TODAS las opciones del
+ * select, no sólo las esperadas.
+ */
+const DESDE_AIRTABLE = new Map<string, EstadoReserva>([
+  ["Confirmada", "CONFIRMADA"],
+  ["Cancelada", "CANCELADA"],
+  ["Señada", "CONFIRMADA"],
+  ["Pendiente", "PENDIENTE_SENIA"],
+  ["Pendiente de seña", "PENDIENTE_SENIA"],
+]);
 
 export function parsearEstado(valor: unknown): EstadoReserva | null {
   if (typeof valor !== "string") return null;
   return DESDE_AIRTABLE.get(valor.trim()) ?? null;
 }
+
+/**
+ * Las etiquetas candidatas para **escribir** un estado, en orden de preferencia.
+ *
+ * Leer es fácil: `DESDE_AIRTABLE` acepta los dos vocabularios que existen hoy.
+ * Escribir no, porque hay que elegir un string y con `typecast: false` una
+ * opción que no exista en el select hace fallar el request (a propósito: es lo
+ * que evita que se inventen opciones nuevas).
+ *
+ * Y los dos vocabularios están vivos al mismo tiempo:
+ *   - el del doc (§8.1):        Confirmada / Cancelada / "Pendiente de seña"
+ *   - el de la base real:       Confirmada / Cancelada / "Pendiente" / "Señada"
+ *
+ * "Confirmada" y "Cancelada" coinciden en los dos, así que esos no tienen
+ * problema. El pendiente NO coincide, y ahí es donde una escritura fallaría
+ * contra una base u otra según qué literal se hubiera hardcodeado.
+ *
+ * Por eso es una lista y no un string: la capa de escritura prueba la primera
+ * y, sólo si Airtable la rechaza por opción inválida, prueba la siguiente. No
+ * es adivinar — son las dos únicas etiquetas relevadas, y si ninguna existe el
+ * error se propaga en vez de taparse.
+ */
+export const ETIQUETAS_ESCRITURA: Record<EstadoReserva, readonly string[]> = {
+  CONFIRMADA: ["Confirmada"],
+  CANCELADA: ["Cancelada"],
+  PENDIENTE_SENIA: ["Pendiente de seña", "Pendiente"],
+} as const;
 
 /**
  * Los días del multi-select "Dias Activos", indexados como getUTCDay():

@@ -457,6 +457,421 @@ export async function reactivarLimiteAction(
   return {};
 }
 
+/**
+ * Pasa un agente de EN_CONFIGURACION a ACTIVO (SDD v2 §2).
+ *
+ * Es deliberadamente una acción manual del admin y no algo automático al cargar
+ * las credenciales: activar significa "ya verifiqué que este agente puede
+ * atender clientes reales". Ese checklist (convención "Cancha N" en Airtable,
+ * typecast desactivado en el nodo de n8n, instancia de Evolution vinculada) no
+ * se puede comprobar desde acá — lo hace una persona.
+ *
+ * Sólo activa desde EN_CONFIGURACION: no sirve para levantar un PAUSADO_LIMITE
+ * (para eso está `reactivarLimiteAction`, que además mira el pozo) ni para
+ * pisarle al cliente un PAUSADO_MANUAL que decidió él.
+ */
+export async function activarAgenteAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const agenteId = String(formData.get("agenteId") ?? "");
+  if (!agenteId) return { error: "Falta el agente" };
+
+  const agente = await prisma.agente.findUnique({
+    where: { id: agenteId },
+    select: { id: true, estado: true, clienteId: true },
+  });
+  if (!agente) return { error: "Agente inexistente" };
+
+  if (agente.estado !== "EN_CONFIGURACION") {
+    return {
+      error:
+        agente.estado === "ACTIVO"
+          ? "Este agente ya está activo."
+          : "Este agente no está en configuración: está pausado, y eso se levanta por otro camino.",
+    };
+  }
+
+  await prisma.agente.update({
+    where: { id: agenteId },
+    data: { estado: "ACTIVO" },
+  });
+
+  revalidatePath(`/admin/agentes/${agenteId}`);
+  revalidatePath(`/admin/clientes/${agente.clienteId}`);
+  revalidatePath("/admin");
+  return {};
+}
+
+const marcarPagadoSchema = z.object({
+  clienteId: z.string().min(1),
+  monto: z.coerce.number().positive("El monto tiene que ser mayor a cero"),
+});
+
+/**
+ * Marca un cobro como recibido a mano (SDD v2 §4.4, "excepción manual").
+ *
+ * Es para transferencia, efectivo o cortesía: casos que Mercado Pago nunca va a
+ * informar. Convive con el flujo automático, no lo reemplaza.
+ *
+ * Hace lo mismo que un pago aprobado por webhook: registra el `Pago` (con
+ * `origen = MANUAL`), pone al cliente AL_DIA y **reactiva las sedes que se
+ * habían pausado por deuda**. Sin eso último, marcar como pagado dejaría al
+ * cliente "al día" pero con el bot mudo.
+ */
+export async function marcarPagadoAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const parsed = marcarPagadoSchema.safeParse({
+    clienteId: formData.get("clienteId"),
+    monto: formData.get("monto"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const { clienteId, monto } = parsed.data;
+  const ahora = new Date();
+  const proximo = new Date(ahora);
+  proximo.setMonth(proximo.getMonth() + 1);
+
+  const cliente = await prisma.cliente.findUnique({
+    where: { id: clienteId },
+    select: { id: true },
+  });
+  if (!cliente) return { error: "Cliente inexistente" };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.pago.create({
+      data: {
+        clienteId,
+        monto,
+        fecha: ahora,
+        estado: "APROBADO",
+        origen: "MANUAL",
+      },
+    });
+
+    await tx.cliente.update({
+      where: { id: clienteId },
+      data: {
+        estadoPago: "AL_DIA",
+        fechaProximoCobro: proximo,
+        graciaDesde: null,
+        ultimoAvisoPagoEn: null,
+      },
+    });
+
+    await tx.agente.updateMany({
+      where: { clienteId, estado: "PAUSADO_POR_PAGO" },
+      data: { estado: "ACTIVO" },
+    });
+  });
+
+  revalidatePath(`/admin/clientes/${clienteId}`);
+  revalidatePath("/admin");
+  return {};
+}
+
+/**
+ * Reactiva UN agente pausado, sin esperar al cron (SDD v2 §6).
+ *
+ * Distinto de `reactivarLimiteAction`, que levanta todas las sedes de un cliente
+ * pausadas por límite: esto es puntual, para cuando hay que destrabar una sola.
+ *
+ * Sólo levanta pausas que puso el sistema (límite o pago). **No toca
+ * PAUSADO_MANUAL**: esa la decidió el cliente y no es del admin revertirla — si
+ * el dueño pausó su bot por mantenimiento, reactivárselo por atrás sería
+ * mandarle mensajes a sus clientes sin que lo sepa.
+ */
+export async function reactivarAgenteAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const agenteId = String(formData.get("agenteId") ?? "");
+  if (!agenteId) return { error: "Falta el agente" };
+
+  const agente = await prisma.agente.findUnique({
+    where: { id: agenteId },
+    select: { estado: true, clienteId: true },
+  });
+  if (!agente) return { error: "Agente inexistente" };
+
+  if (agente.estado === "PAUSADO_MANUAL") {
+    return {
+      error:
+        "Este agente lo pausó el cliente desde su panel. Reactivarlo es decisión suya, no nuestra.",
+    };
+  }
+
+  if (agente.estado !== "PAUSADO_LIMITE" && agente.estado !== "PAUSADO_POR_PAGO") {
+    return { error: "Este agente no está pausado por el sistema." };
+  }
+
+  await prisma.agente.update({
+    where: { id: agenteId },
+    data: { estado: "ACTIVO" },
+  });
+
+  revalidatePath(`/admin/agentes/${agenteId}`);
+  revalidatePath(`/admin/clientes/${agente.clienteId}`);
+  revalidatePath("/admin/panel");
+  return {};
+}
+
+const planSchema = z.object({
+  planId: z.string().optional(),
+  nombre: z.string().trim().min(2, "El nombre del plan es obligatorio"),
+  maxAgentes: z.coerce.number().int().min(1, "Tiene que permitir al menos una sede"),
+  maxConversacionesMes: z.coerce
+    .number()
+    .int()
+    .min(1, "Tiene que permitir al menos una conversación"),
+  precio: z.coerce.number().min(0, "El precio no puede ser negativo"),
+  mercadoPagoPlanId: z.string().trim().optional(),
+});
+
+/**
+ * Crea o edita un plan (SDD v2 §6).
+ *
+ * Hasta acá los planes venían del seed y cambiarlos era editar código. Cobra
+ * importancia con la facturación: `precio` es el monto que se cobra de verdad.
+ *
+ * Bajar los límites de un plan que ya tiene clientes se rechaza: dejaría a
+ * clientes existentes por encima del tope de un plan que ellos no cambiaron, y
+ * el efecto sería pausarles el bot sin aviso.
+ */
+export async function guardarPlanAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const parsed = planSchema.safeParse({
+    planId: formData.get("planId") ?? undefined,
+    nombre: formData.get("nombre"),
+    maxAgentes: formData.get("maxAgentes"),
+    maxConversacionesMes: formData.get("maxConversacionesMes"),
+    precio: formData.get("precio"),
+    mercadoPagoPlanId: formData.get("mercadoPagoPlanId") ?? undefined,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const d = parsed.data;
+  const datos = {
+    nombre: d.nombre,
+    maxAgentes: d.maxAgentes,
+    maxConversacionesMes: d.maxConversacionesMes,
+    precio: d.precio,
+    mercadoPagoPlanId: d.mercadoPagoPlanId || null,
+  };
+
+  try {
+    if (d.planId) {
+      await prisma.$transaction(async (tx) => {
+        // ¿Algún cliente de este plan quedaría fuera del nuevo tope de sedes?
+        const excedidos = await tx.cliente.findMany({
+          where: { planId: d.planId },
+          select: { nombre: true, _count: { select: { agentes: true } } },
+        });
+        const conflicto = excedidos.find((c) => c._count.agentes > d.maxAgentes);
+        if (conflicto) {
+          throw new ErrorNegocio(
+            `${conflicto.nombre} ya tiene ${conflicto._count.agentes} sede(s): no se puede bajar el tope a ${d.maxAgentes}.`,
+          );
+        }
+
+        await tx.plan.update({ where: { id: d.planId }, data: datos });
+      });
+    } else {
+      await prisma.plan.create({ data: datos });
+    }
+  } catch (error) {
+    if (error instanceof ErrorNegocio) return { error: error.message };
+    throw error;
+  }
+
+  revalidatePath("/admin/planes");
+  revalidatePath("/admin/panel");
+  revalidatePath("/admin");
+  return {};
+}
+
+const notasSchema = z.object({
+  clienteId: z.string().min(1),
+  notas: z.string().max(5000, "Las notas no pueden pasar de 5000 caracteres"),
+});
+
+/**
+ * Guarda las notas internas de un cliente (SDD v2 §8).
+ *
+ * Son del equipo de Vibo y **el cliente nunca las ve**: ninguna consulta de
+ * `lib/cliente/*` selecciona este campo. Si alguna vez alguien lo agrega ahí sin
+ * pensar, expone comentarios internos en el panel del dueño.
+ */
+export async function guardarNotasAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const parsed = notasSchema.safeParse({
+    clienteId: formData.get("clienteId"),
+    notas: formData.get("notas") ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  await prisma.cliente.update({
+    where: { id: parsed.data.clienteId },
+    data: { notasInternas: parsed.data.notas.trim() || null },
+  });
+
+  revalidatePath(`/admin/clientes/${parsed.data.clienteId}`);
+  return {};
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Baja de clientes.
+ *
+ * Dos caminos, a propósito:
+ *
+ *  - **Archivar** es el normal y es reversible. El cliente deja de aparecer en
+ *    listados y métricas, y su bot deja de responder, pero no se destruye nada:
+ *    los pagos son contabilidad y los mensajes son datos personales de los
+ *    clientes de tu cliente (SDD §7.4).
+ *  - **Eliminar** es definitivo y sólo se habilita si el cliente **nunca tuvo un
+ *    pago registrado**. Es para limpiar cuentas de prueba, no para dar de baja
+ *    a alguien que facturó.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function archivarClienteAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const clienteId = String(formData.get("clienteId") ?? "");
+  if (!clienteId) return { error: "Falta el cliente" };
+
+  const cliente = await prisma.cliente.findUnique({
+    where: { id: clienteId },
+    select: { archivadoAt: true },
+  });
+  if (!cliente) return { error: "Cliente inexistente" };
+  if (cliente.archivadoAt) return { error: "Este cliente ya está archivado." };
+
+  await prisma.cliente.update({
+    where: { id: clienteId },
+    data: { archivadoAt: new Date() },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/panel");
+  revalidatePath(`/admin/clientes/${clienteId}`);
+  return {};
+}
+
+/** Devuelve un cliente archivado a la operación. Su bot vuelve a responder. */
+export async function desarchivarClienteAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const clienteId = String(formData.get("clienteId") ?? "");
+  if (!clienteId) return { error: "Falta el cliente" };
+
+  await prisma.cliente.update({
+    where: { id: clienteId },
+    data: { archivadoAt: null },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/panel");
+  revalidatePath(`/admin/clientes/${clienteId}`);
+  return {};
+}
+
+const eliminarClienteSchema = z.object({
+  clienteId: z.string().min(1),
+  /** El nombre tipeado por el admin: tiene que coincidir exacto. */
+  confirmacion: z.string(),
+});
+
+/**
+ * Elimina un cliente **definitivamente**.
+ *
+ * Tres barreras, porque no hay vuelta atrás:
+ *  1. Sólo si no tiene ningún pago registrado (contabilidad).
+ *  2. El admin tiene que tipear el nombre exacto del cliente.
+ *  3. El borrado va en una transacción y en orden explícito.
+ *
+ * Lo de la transacción no es ceremonia: `Usuario.clienteId` es opcional, así que
+ * el borrado en cascada por defecto haría `SetNull` y dejaría **logins
+ * huérfanos** — cuentas que entran a la plataforma sin pertenecer a ningún
+ * cliente. Por eso los usuarios se borran a mano, primero.
+ */
+export async function eliminarClienteAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const parsed = eliminarClienteSchema.safeParse({
+    clienteId: formData.get("clienteId"),
+    confirmacion: formData.get("confirmacion") ?? "",
+  });
+  if (!parsed.success) return { error: "Datos inválidos" };
+
+  const { clienteId, confirmacion } = parsed.data;
+
+  const cliente = await prisma.cliente.findUnique({
+    where: { id: clienteId },
+    select: { nombre: true, _count: { select: { pagos: true } } },
+  });
+  if (!cliente) return { error: "Cliente inexistente" };
+
+  if (cliente._count.pagos > 0) {
+    return {
+      error: `${cliente.nombre} tiene ${cliente._count.pagos} pago(s) registrados: eliminarlo borraría contabilidad. Archivalo en vez de borrarlo.`,
+    };
+  }
+
+  if (confirmacion.trim() !== cliente.nombre) {
+    return { error: "El nombre no coincide. Escribilo exactamente como figura." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const agentes = await tx.agente.findMany({
+      where: { clienteId },
+      select: { id: true },
+    });
+    const agenteIds = agentes.map((a) => a.id);
+
+    if (agenteIds.length > 0) {
+      // Los mensajes caen por cascada al borrar la conversación, y las pruebas
+      // al borrar el agente; el resto no tiene cascada y va explícito.
+      await tx.conversacion.deleteMany({ where: { agenteId: { in: agenteIds } } });
+      await tx.usoMensual.deleteMany({ where: { agenteId: { in: agenteIds } } });
+      await tx.cancha.deleteMany({ where: { agenteId: { in: agenteIds } } });
+      await tx.agente.deleteMany({ where: { clienteId } });
+    }
+
+    // Antes que el cliente, si no quedan con clienteId en null.
+    await tx.usuario.deleteMany({ where: { clienteId } });
+    await tx.cliente.delete({ where: { id: clienteId } });
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/panel");
+  redirect("/admin");
+}
+
 /** Error esperable de negocio, para distinguirlo de una falla real. */
 class ErrorNegocio extends Error {}
 

@@ -17,13 +17,20 @@ import { prisma } from "@/lib/prisma";
  * (sprints 3 y 4), nunca para mostrarlo.
  */
 
-export const listarClientes = cache(async () => {
+export const listarClientes = cache(async (incluirArchivados = false) => {
   return prisma.cliente.findMany({
+    // Los archivados no son clientes: quedan fuera salvo que se pidan
+    // explícitamente desde el filtro del listado.
+    where: incluirArchivados ? {} : { archivadoAt: null },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
       nombre: true,
       createdAt: true,
+      archivadoAt: true,
+      // El estado de pago va en el listado y no sólo en el detalle: es lo
+      // primero que hay que ver al abrir el admin (SDD v2 §7).
+      estadoPago: true,
       plan: { select: { id: true, nombre: true, maxAgentes: true } },
       _count: { select: { agentes: true, usuarios: true } },
     },
@@ -37,13 +44,28 @@ export const obtenerCliente = cache(async (id: string) => {
       id: true,
       nombre: true,
       createdAt: true,
+      // Facturación (SDD v2 §4). El admin necesita ver el estado de cobro junto
+      // al resto: es el dato que explica por qué un agente está pausado.
+      archivadoAt: true,
+      notasInternas: true,
+      estadoPago: true,
+      fechaProximoCobro: true,
+      graciaDesde: true,
+      mercadoPagoSubscriptionId: true,
+      _count: { select: { pagos: true } },
       plan: {
         select: {
           id: true,
           nombre: true,
           maxAgentes: true,
           maxConversacionesMes: true,
+          precio: true,
         },
+      },
+      pagos: {
+        select: { id: true, monto: true, fecha: true, estado: true, origen: true },
+        orderBy: { fecha: "desc" },
+        take: 10,
       },
       usuarios: {
         select: { id: true, email: true, rol: true, createdAt: true },

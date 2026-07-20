@@ -131,9 +131,29 @@ export async function registrarMensaje(
 export type PuedeResponder = { puedeResponder: boolean; motivo?: string };
 
 export async function evaluarPuedeResponder(
-  agente: { id: string; estado: string },
+  agente: { id: string; estado: string; clienteArchivado?: boolean },
   telefono: string | null,
 ): Promise<PuedeResponder> {
+  // Cliente archivado: dejó de ser cliente. Va primero porque manda sobre
+  // cualquier estado del agente — no tiene sentido seguir atendiendo a alguien
+  // que se dio de baja, aunque su agente figure ACTIVO.
+  if (agente.clienteArchivado) {
+    return { puedeResponder: false, motivo: "cliente_archivado" };
+  }
+  // Un agente EN_CONFIGURACION no atiende a nadie todavía (SDD v2 §2): está
+  // cargado y se puede probar en el chat de prueba, pero no se verificó que sus
+  // credenciales reales anden. Si llegara un mensaje de WhatsApp —por un webhook
+  // que quedó apuntando, por ejemplo— responder sería peor que no hacerlo: le
+  // estaría contestando a un cliente real con una configuración sin verificar.
+  if (agente.estado === "EN_CONFIGURACION") {
+    return { puedeResponder: false, motivo: "agente_en_configuracion" };
+  }
+  // Falta de pago (SDD v2 §4.4). Se corta el servicio, igual que con el límite
+  // de plan: si el bot siguiera respondiendo, no habría diferencia entre pagar
+  // y no pagar.
+  if (agente.estado === "PAUSADO_POR_PAGO") {
+    return { puedeResponder: false, motivo: "agente_pausado_por_pago" };
+  }
   if (agente.estado === "PAUSADO_MANUAL") {
     return { puedeResponder: false, motivo: "agente_pausado_manual" };
   }

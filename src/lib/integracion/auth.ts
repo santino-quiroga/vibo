@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { EstadoAgente } from "@/generated/prisma/enums";
 import { hashToken } from "@/lib/tokens";
 import { prisma } from "@/lib/prisma";
 
@@ -18,7 +19,9 @@ import { prisma } from "@/lib/prisma";
 export type AgenteAutenticado = {
   id: string;
   clienteId: string;
-  estado: "ACTIVO" | "PAUSADO_MANUAL" | "PAUSADO_LIMITE";
+  estado: EstadoAgente;
+  /** Si el cliente dueño está archivado: dejó de ser cliente, el bot no atiende. */
+  clienteArchivado: boolean;
   evolutionInstanceId: string;
   evolutionApiUrlEnc: string;
   evolutionApiKeyEnc: string;
@@ -68,6 +71,9 @@ export async function autenticarAgente(request: Request): Promise<ResultadoAuth>
       evolutionInstanceId: true,
       evolutionApiUrlEnc: true,
       evolutionApiKeyEnc: true,
+      // Va en el mismo select y no en una consulta aparte: esto corre en el
+      // camino caliente de cada mensaje entrante.
+      cliente: { select: { archivadoAt: true } },
     },
   });
 
@@ -77,7 +83,8 @@ export async function autenticarAgente(request: Request): Promise<ResultadoAuth>
     return { ok: false, status: 401, error: "Token inválido" };
   }
 
-  return { ok: true, agente };
+  const { cliente, ...resto } = agente;
+  return { ok: true, agente: { ...resto, clienteArchivado: cliente.archivadoAt !== null } };
 }
 
 /**

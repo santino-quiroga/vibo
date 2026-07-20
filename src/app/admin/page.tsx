@@ -10,21 +10,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EstadoPagoBadge } from "@/components/pagos/estado-pago";
 import { listarClientes } from "@/lib/admin/datos";
+import { riesgosPorCliente } from "@/lib/admin/panel";
 import { limiteAlcanzado } from "@/lib/admin/limite-agentes";
 import { requerirViboAdmin } from "@/lib/dal";
 
 export const metadata: Metadata = { title: "Clientes | Admin Vibo" };
 
-const formatoFecha = new Intl.DateTimeFormat("es-AR", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archivados?: string }>;
+}) {
   await requerirViboAdmin();
-  const clientes = await listarClientes();
+  const { archivados } = await searchParams;
+  const verArchivados = archivados === "1";
+  const [clientes, riesgos] = await Promise.all([
+    listarClientes(verArchivados),
+    riesgosPorCliente(),
+  ]);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -37,9 +42,21 @@ export default async function AdminPage() {
               : `${clientes.length} ${clientes.length === 1 ? "cliente" : "clientes"}`}
           </p>
         </div>
-        <BotonEnlace href="/admin/clientes/nuevo">
-          Nuevo cliente
-        </BotonEnlace>
+        <div className="flex items-center gap-2">
+          <BotonEnlace
+            variant="outline"
+            href={verArchivados ? "/admin" : "/admin?archivados=1"}
+          >
+            {verArchivados ? "Ver solo activos" : "Ver archivados"}
+          </BotonEnlace>
+          <BotonEnlace variant="outline" href="/api/admin/clientes-csv">
+            Exportar CSV
+          </BotonEnlace>
+          <BotonEnlace variant="outline" href="/admin/panel">
+            Panel
+          </BotonEnlace>
+          <BotonEnlace href="/admin/clientes/nuevo">Nuevo cliente</BotonEnlace>
+        </div>
       </header>
 
       {clientes.length === 0 ? (
@@ -58,8 +75,10 @@ export default async function AdminPage() {
               <TableRow>
                 <TableHead>Complejo</TableHead>
                 <TableHead>Plan</TableHead>
+                <TableHead>Pago</TableHead>
                 <TableHead>Agentes</TableHead>
-                <TableHead>Alta</TableHead>
+                <TableHead>Uso del ciclo</TableHead>
+                <TableHead>Señales</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -69,11 +88,22 @@ export default async function AdminPage() {
                   cliente._count.agentes,
                   cliente.plan.maxAgentes,
                 );
+                const riesgo = riesgos.get(cliente.id);
                 return (
                   <TableRow key={cliente.id}>
-                    <TableCell className="font-medium">{cliente.nombre}</TableCell>
+                    <TableCell className="font-medium">
+                      {cliente.nombre}
+                      {cliente.archivadoAt && (
+                        <span className="etiqueta ml-2 text-[10px] text-neutral-400">
+                          archivado
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline">{cliente.plan.nombre}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <EstadoPagoBadge estado={cliente.estadoPago} />
                     </TableCell>
                     <TableCell>
                       <span className={enLimite ? "text-vibo-acento" : undefined}>
@@ -85,8 +115,39 @@ export default async function AdminPage() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="text-neutral-500">
-                      {formatoFecha.format(cliente.createdAt)}
+                    <TableCell className="whitespace-nowrap tabular-nums">
+                      {riesgo ? (
+                        <>
+                          {riesgo.usadas} / {riesgo.limite}
+                          {riesgo.porcentaje !== null && (
+                            <span className="ml-1 text-xs text-neutral-400">
+                              ({Math.round(riesgo.porcentaje * 100)}%)
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {riesgo && riesgo.senales.length > 0 ? (
+                        <ul className="space-y-0.5">
+                          {riesgo.senales.map((senal) => (
+                            <li
+                              key={senal.tipo}
+                              className={
+                                senal.tipo === "uso_alto"
+                                  ? "text-xs text-vibo-rojo"
+                                  : "text-xs text-neutral-500"
+                              }
+                            >
+                              {senal.detalle}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-xs text-neutral-400">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <BotonEnlace

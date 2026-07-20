@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
  */
 const TABS = [
   { href: "/dashboard/turnos", etiqueta: "Reservas" },
+  { href: "/dashboard/turnos/calendario", etiqueta: "Calendario" },
   { href: "/dashboard/turnos/horarios", etiqueta: "Horarios disponibles" },
 ];
 

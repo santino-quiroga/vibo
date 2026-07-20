@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { procesarCobranza } from "@/lib/pagos/cobranza-cron";
 import { reconciliarLimites } from "@/lib/planes/ciclo-cron";
 
 export const runtime = "nodejs";
@@ -34,6 +35,34 @@ export async function GET(request: Request) {
     }
   }
 
-  const resultado = await reconciliarLimites();
-  return NextResponse.json({ ok: true, ...resultado });
+  // Dos responsabilidades en el mismo cron diario: los ciclos de plan (SDD v1
+  // §9.5) y la cobranza (SDD v2 §4.4, que se le suma explícitamente).
+  //
+  // Van con allSettled y no en secuencia: si la cobranza falla, la
+  // reconciliación de límites igual tiene que haber corrido, y al revés. Un
+  // error en una no puede dejar clientes sin reactivar ni deudas sin vencer.
+  const [limites, cobranza] = await Promise.allSettled([
+    reconciliarLimites(),
+    procesarCobranza(),
+  ]);
+
+  if (limites.status === "rejected") {
+    console.error("[cron] falló la reconciliación de límites:", limites.reason);
+  }
+  if (cobranza.status === "rejected") {
+    console.error("[cron] falló la cobranza:", cobranza.reason);
+  }
+
+  const huboFallo = limites.status === "rejected" || cobranza.status === "rejected";
+
+  return NextResponse.json(
+    {
+      ok: !huboFallo,
+      limites: limites.status === "fulfilled" ? limites.value : { error: true },
+      cobranza: cobranza.status === "fulfilled" ? cobranza.value : { error: true },
+    },
+    // Si algo falló se devuelve 500 para que quede visible en los logs de Vercel
+    // en vez de pasar por un cron "verde" que en realidad no hizo la mitad.
+    { status: huboFallo ? 500 : 200 },
+  );
 }

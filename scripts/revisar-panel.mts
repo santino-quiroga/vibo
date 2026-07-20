@@ -63,7 +63,11 @@ async function main() {
     console.log(`\n=== ${vp.nombre} (${vp.ancho}px) ===`);
 
     // --- Login real, por el formulario ---
-    await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+    // "networkidle" NO sirve en dev: el websocket de HMR de Next nunca queda
+    // idle, así que goto se cuelga para siempre. Se espera el DOM y después el
+    // elemento concreto que confirma que la página está usable.
+    await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('input[name="email"]');
     await page.fill('input[name="email"]', EMAIL);
     await page.fill('input[name="password"]', PASSWORD);
     await Promise.all([
@@ -73,7 +77,10 @@ async function main() {
     console.log(`login ok -> ${new URL(page.url()).pathname}`);
 
     for (const ruta of RUTAS) {
-      await page.goto(`${BASE}${ruta}`, { waitUntil: "networkidle" });
+      await page.goto(`${BASE}${ruta}`, { waitUntil: "domcontentloaded" });
+      // El h1 es lo que se mide más abajo: esperarlo evita medir una página a
+      // medio pintar y reportar un desborde que no existe.
+      await page.waitForSelector("h1", { timeout: 15_000 }).catch(() => {});
       await page.waitForTimeout(500);
 
       const medida = await page.evaluate(() => {

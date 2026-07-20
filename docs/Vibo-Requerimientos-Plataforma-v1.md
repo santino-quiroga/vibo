@@ -152,8 +152,10 @@ Explícitamente **no incluye**: nada de conectar canal, ni integraciones — eso
 Vista unificada de las reservas generadas por el agente, para que el cliente no tenga que abrir Airtable por su cuenta.
 
 - **Vista lista y vista calendario** (día/semana), filtrable por sede/agente y por cancha
+  - **Vista lista** ("Reservas"): tabla de turnos con contacto, cancha, fecha/hora, estado, precio
+  - **Vista calendario** (día/semana): grilla horaria con el **nombre del contacto y la cancha en cada turno reservado** — uso operativo, para que alguien en la recepción vea de un vistazo quién juega dónde y a qué hora. **No confundir con el heatmap "Ocupación y horarios pico" de Inicio**, que es un KPI agregado (% de ocupación por franja, sin nombres) — son dos vistas distintas con propósitos distintos, aunque ambas muestren franjas horarias
 - Cada turno muestra: contacto, cancha, fecha/hora, estado (confirmado / cancelado / pendiente de seña), precio
-- Acciones básicas v1: cancelar o reprogramar un turno manualmente (esto escribe de vuelta en Airtable, no en una tabla propia)
+- **Acciones v1 (pendiente de implementación):** cancelar o reprogramar un turno manualmente desde la vista lista — esto escribe de vuelta en Airtable, no en una tabla propia. Sigue siendo parte del alcance de v1, no se movió a v2.
 - Este dato alimenta directamente los KPIs de Inicio (turnos reservados, ocupación, ingresos estimados) — misma fuente, dos vistas distintas
 
 ### 8.0 Gestión de horarios disponibles (Slots) — agregado tras revisión de MVP

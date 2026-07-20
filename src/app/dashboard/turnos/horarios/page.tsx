@@ -1,29 +1,17 @@
 import type { Metadata } from "next";
 
 import { AvisoDegradado } from "@/components/cliente/aviso-degradado";
-import { SlotToggle } from "@/components/cliente/slot-toggle";
 import { TurnosTabs } from "@/components/cliente/turnos-tabs";
 import { SelectNativo } from "@/components/admin/select-nativo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DIAS_SEMANA } from "@/lib/airtable/campos";
-import { formatearHora } from "@/lib/airtable/tipos";
 import { datosDeHorarios } from "@/lib/cliente/horarios";
 import { requerirClienteOwner } from "@/lib/dal";
-import { cn } from "@/lib/utils";
 
+import { FilaSlot } from "./fila-slot";
 import { NuevoSlotForm } from "./nuevo-slot-form";
 
 export const metadata: Metadata = { title: "Horarios | Vibo" };
-
-/** Abreviatura de los días activos de un slot, en orden de semana. */
-function diasCortos(indices: number[]): string {
-  const orden = [1, 2, 3, 4, 5, 6, 0];
-  return orden
-    .filter((d) => indices.includes(d))
-    .map((d) => DIAS_SEMANA[d].slice(0, 3))
-    .join(" · ");
-}
 
 export default async function HorariosPage({
   searchParams,
@@ -38,10 +26,10 @@ export default async function HorariosPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-bold tracking-tight">Turnos</h1>
+        <h1 className="t-pagina">Turnos</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Los horarios disponibles de cada cancha. Crear, activar o desactivar un
-          horario escribe directo en tu base de turnos.
+          Los horarios disponibles de cada cancha. Crear, editar, activar o
+          desactivar un horario escribe directo en tu base de turnos.
         </p>
       </div>
 
@@ -112,32 +100,12 @@ export default async function HorariosPage({
                   ) : (
                     <ul className="divide-y divide-neutral-200">
                       {datos.slots.map((slot) => (
-                        <li
+                        <FilaSlot
                           key={slot.recordId}
-                          className="flex flex-wrap items-center justify-between gap-3 py-3"
-                        >
-                          <div className="min-w-0">
-                            <p className={cn("font-medium", !slot.activo && "text-neutral-400")}>
-                              <span className="font-mono">
-                                {slot.horaInicioMin !== null ? formatearHora(slot.horaInicioMin) : "—"}
-                              </span>{" "}
-                              {slot.nombre ?? ""}
-                              {!slot.activo && (
-                                <span className="etiqueta ml-2 text-[10px] text-neutral-400">inactivo</span>
-                              )}
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              {slot.duracionMin ? `${slot.duracionMin} min · ` : ""}
-                              {slot.canchas.join(", ") || "sin canchas"}
-                              {slot.diasActivos.length > 0 && ` · ${diasCortos(slot.diasActivos)}`}
-                            </p>
-                          </div>
-                          <SlotToggle
-                            agenteId={datos.seleccionada!.id}
-                            recordId={slot.recordId}
-                            activo={slot.activo}
-                          />
-                        </li>
+                          agenteId={datos.seleccionada!.id}
+                          slot={slot}
+                          canchasConfiguradas={datos.canchasConfiguradas}
+                        />
                       ))}
                     </ul>
                   )}

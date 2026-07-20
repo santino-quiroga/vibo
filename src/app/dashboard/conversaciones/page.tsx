@@ -36,7 +36,7 @@ export default async function ConversacionesPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-bold tracking-tight">Conversaciones</h1>
+        <h1 className="t-pagina">Conversaciones</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Los chats de WhatsApp de tus agentes. Podés tomar el control de uno
           cuando haga falta atender a mano.
@@ -55,7 +55,6 @@ export default async function ConversacionesPage({
       ) : (
         <>
           <FiltroConversaciones
-            agentes={agentes}
             sedeActual={params.sede ?? null}
             estadoActual={estado}
             busquedaActual={params.q ?? ""}

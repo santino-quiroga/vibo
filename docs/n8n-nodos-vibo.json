@@ -1,0 +1,118 @@
+{
+  "meta": {
+    "instanceId": "vibo-integracion"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ {\n  \"telefono\": $('Webhook').item.json.body.data.key.remoteJid.split('@')[0],\n  \"texto\": ($json.text || $json.finalText || ''),\n  \"nombre\": ($('Webhook').item.json.body.data.pushName || ''),\n  \"msgId\": ($('Webhook').item.json.body.data.key.id || '')\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-144, 240],
+      "id": "a1b0c000-0000-4000-8000-000000000001",
+      "name": "Vibo - Preparar"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://interests-problems-pamela-characterization.trycloudflare.com/api/integracion/mensajes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"agenteId\": \"cmrqu6d2z0002g0unj884x1x7\",\n  \"telefono\": $json.telefono,\n  \"remitente\": \"CONTACTO\",\n  \"contenido\": $json.texto,\n  \"contactoNombre\": $json.nombre,\n  \"evolutionMsgId\": $json.msgId\n} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [32, 240],
+      "id": "a1b0c000-0000-4000-8000-000000000002",
+      "name": "Vibo - Log contacto",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://interests-problems-pamela-characterization.trycloudflare.com/api/integracion/agentes/cmrqu6d2z0002g0unj884x1x7/puede-responder?telefono={{ $('Vibo - Preparar').item.json.telefono }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [208, 240],
+      "id": "a1b0c000-0000-4000-8000-000000000003",
+      "name": "Vibo - Puede responder",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a1b0c000-0000-4000-8000-00000000000f",
+              "leftValue": "={{ $json.puedeResponder !== false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [384, 240],
+      "id": "a1b0c000-0000-4000-8000-000000000004",
+      "name": "Vibo - ¿Responder?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://interests-problems-pamela-characterization.trycloudflare.com/api/integracion/mensajes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"agenteId\": \"cmrqu6d2z0002g0unj884x1x7\",\n  \"telefono\": $('Vibo - Preparar').item.json.telefono,\n  \"remitente\": \"IA\",\n  \"contenido\": $('AI Agent1').item.json.output,\n  \"evolutionMsgId\": ($json.key?.id || '')\n} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [592, 16],
+      "id": "a1b0c000-0000-4000-8000-000000000005",
+      "name": "Vibo - Log IA",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Vibo - Preparar": {
+      "main": [[{ "node": "Vibo - Log contacto", "type": "main", "index": 0 }]]
+    },
+    "Vibo - Log contacto": {
+      "main": [[{ "node": "Vibo - Puede responder", "type": "main", "index": 0 }]]
+    },
+    "Vibo - Puede responder": {
+      "main": [[{ "node": "Vibo - ¿Responder?", "type": "main", "index": 0 }]]
+    }
+  }
+}

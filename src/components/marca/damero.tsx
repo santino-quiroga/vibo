@@ -36,7 +36,13 @@ export function Damero({
   );
 }
 
-/** La franja de damero que encabeza cada página, como en el manual. */
+/**
+ * La franja de damero que encabeza cada página.
+ *
+ * 4px de alto y cuadro de 4px: a esa escala se lee como un detalle de marca y
+ * no como una banda. Una franja gruesa arriba de un panel que busca calma
+ * compite con el contenido, que es lo que el usuario vino a mirar.
+ */
 export function FranjaDamero({
   c1,
   c2,
@@ -47,6 +53,6 @@ export function FranjaDamero({
   className?: string;
 }) {
   return (
-    <Damero c1={c1} c2={c2} cuadro={10} className={cn("h-1.5 w-full", className)} />
+    <Damero c1={c1} c2={c2} cuadro={4} className={cn("h-1 w-full", className)} />
   );
 }

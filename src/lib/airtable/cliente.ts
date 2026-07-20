@@ -38,6 +38,7 @@ export type MotivoError =
   | "no_encontrado" // base o tabla que no existe (o nombre mal escrito)
   | "rate" // 429, incluso después de reintentar
   | "red" // timeout o falla de conexión
+  | "datos_invalidos" // 422: un valor no coincide con las opciones del select
   | "desconocido";
 
 export class ErrorAirtable extends Error {
@@ -58,6 +59,12 @@ export class ErrorAirtable extends Error {
         return "No se encontró la base de turnos de este agente. El equipo de Vibo tiene que revisar la configuración.";
       case "rate":
         return "Los turnos están tardando más de lo normal. Probá de nuevo en un momento.";
+      case "datos_invalidos":
+        // Pasa cuando una cancha o un estado no coinciden con las opciones que
+        // tiene el select en la base del cliente. No lo puede arreglar el
+        // dueño desde la pantalla, así que se lo deriva en vez de pedirle que
+        // "revise los datos".
+        return "Alguno de los datos no coincide con las opciones de tu base de turnos (la cancha o el estado). El equipo de Vibo tiene que revisarlo.";
       case "red":
       case "desconocido":
         return "No se pudieron cargar los turnos. Probá de nuevo en un momento.";
@@ -111,6 +118,10 @@ function clasificar(status: number): MotivoError {
   if (status === 401 || status === 403) return "auth";
   if (status === 404) return "no_encontrado";
   if (status === 429) return "rate";
+  // 422 es lo que devuelve Airtable cuando un valor de single/multi-select no
+  // existe entre las opciones. Con typecast desactivado es el error esperable
+  // al escribir, no una falla de infraestructura.
+  if (status === 422) return "datos_invalidos";
   return "desconocido";
 }
 

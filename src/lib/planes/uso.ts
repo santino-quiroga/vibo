@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 
+import { ZONA_HORARIA } from "@/lib/airtable/tipos";
 import { cicloDe, etiquetaCiclo } from "@/lib/ciclo";
 import { prisma } from "@/lib/prisma";
 
@@ -21,6 +22,10 @@ export type UsoPlan = {
   /** 0..1 (puede pasar de 1 si se contó de más antes de pausar). */
   porcentaje: number;
   cicloEtiqueta: string;
+  /** Nombre del plan contratado, ej. "Starter". */
+  plan: string;
+  /** Cuándo se renueva el pozo, ej. "1 de agosto". */
+  renovacion: string;
   /** Alguna sede del cliente está pausada por límite. */
   bloqueado: boolean;
   /** Cuántas sedes están en PAUSADO_LIMITE ahora. */
@@ -35,7 +40,7 @@ export const usoDelCliente = cache(async (clienteId: string): Promise<UsoPlan> =
   const [cliente, suma, pausadas] = await Promise.all([
     prisma.cliente.findUnique({
       where: { id: clienteId },
-      select: { plan: { select: { maxConversacionesMes: true } } },
+      select: { plan: { select: { nombre: true, maxConversacionesMes: true } } },
     }),
     prisma.usoMensual.aggregate({
       where: { agente: { clienteId }, cicloInicio: ciclo.inicio },
@@ -53,6 +58,14 @@ export const usoDelCliente = cache(async (clienteId: string): Promise<UsoPlan> =
     limite,
     porcentaje,
     cicloEtiqueta: etiquetaCiclo(ciclo),
+    plan: cliente?.plan.nombre ?? "—",
+    // `ciclo.fin` es el instante en que arranca el próximo pozo: ese mismo día
+    // es la renovación.
+    renovacion: new Intl.DateTimeFormat("es-AR", {
+      timeZone: ZONA_HORARIA,
+      day: "numeric",
+      month: "long",
+    }).format(ciclo.fin),
     bloqueado: pausadas > 0,
     sedesPausadasPorLimite: pausadas,
     avisoPreventivo: pausadas === 0 && porcentaje >= UMBRAL_AVISO,

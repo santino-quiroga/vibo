@@ -2,16 +2,16 @@ import type { EstadoReserva } from "@/lib/airtable/campos";
 import { cn } from "@/lib/utils";
 
 /**
- * El estado de un turno: los tres del single select de Airtable (punto 8.1).
+ * El estado de un turno: los del single select de Airtable (punto 8.1).
  *
- * Sigue la misma lógica que EstadoAgenteBadge: la paleta de marca no tiene
- * verde ni ámbar, así que ningún estado se apoya en el semáforo. El texto dice
- * literalmente qué pasa, y el color acompaña.
+ * Píldoras de fondo suave y texto del mismo tono, con la paleta semántica del
+ * sistema. El rojo de marca no aparece acá: está reservado para la identidad,
+ * y un turno confirmado no es una alerta.
  *
- *  - Confirmada        -> punto rojo de marca. Es lo vendido, lo vivo.
- *  - Pendiente de seña -> neutral con borde marcado. No está cerrado todavía.
- *  - Cancelada         -> apagado y tachado. Se muestra igual: que el dueño vea
- *                         qué se cayó es información, no ruido — pero no compite
+ *  - Confirmada        -> verde. Vendido y cerrado.
+ *  - Pendiente de seña -> ámbar. Tomado pero sin pagar: algo falta.
+ *  - Cancelada         -> apagado y tachado. Se muestra igual, porque que el
+ *                         dueño vea qué se cayó es información — pero no compite
  *                         con lo que sí está en pie.
  *
  * El cuarto caso es el que no está en el punto 8.1: un valor que Airtable
@@ -21,22 +21,21 @@ import { cn } from "@/lib/utils";
  */
 
 const ESTADOS = {
-  CONFIRMADA: { texto: "Confirmada", clase: "bg-vibo-negro text-vibo-blanco" },
+  CONFIRMADA: { texto: "Confirmada", clase: "bg-exito-suave text-exito" },
   PENDIENTE_SENIA: {
     texto: "Pendiente de seña",
-    clase: "bg-neutral-200 text-neutral-700",
+    clase: "bg-warning-suave text-warning",
   },
-  // Cancelada recede: apagado y tachado, no compite con lo que sí está en pie.
   CANCELADA: {
     texto: "Cancelada",
     clase: "bg-neutral-100 text-neutral-400 line-through",
   },
 } as const satisfies Record<EstadoReserva, { texto: string; clase: string }>;
 
-// Un estado que no está en el esquema es una alerta: va en rojo.
+// Un estado fuera del esquema sí es una alerta: va con el color de peligro.
 const DESCONOCIDO = {
   texto: "Estado desconocido",
-  clase: "bg-vibo-rojo text-vibo-blanco",
+  clase: "bg-destructive/8 text-destructive",
 };
 
 export function EstadoTurno({

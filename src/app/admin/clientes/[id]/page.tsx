@@ -15,8 +15,14 @@ import { agentesSinToken, listarPlanes, obtenerCliente } from "@/lib/admin/datos
 import { limiteAlcanzado } from "@/lib/admin/limite-agentes";
 import { usoDelCliente } from "@/lib/planes/uso";
 import { requerirViboAdmin } from "@/lib/dal";
+import { prisma } from "@/lib/prisma";
+
+import { EstadoPagoBadge } from "@/components/pagos/estado-pago";
 
 import { CambiarPlanForm } from "./cambiar-plan-form";
+import { BajaClienteForm } from "./baja-cliente-form";
+import { MarcarPagadoForm } from "./marcar-pagado-form";
+import { NotasForm } from "./notas-form";
 import { ReactivarLimiteForm } from "./reactivar-limite-form";
 import { RegenerarPasswordForm } from "./regenerar-password-form";
 
@@ -26,6 +32,12 @@ const formatoFecha = new Intl.DateTimeFormat("es-AR", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
+});
+
+const moneda = new Intl.NumberFormat("es-AR", {
+  style: "currency",
+  currency: "ARS",
+  maximumFractionDigits: 0,
 });
 
 export default async function ClienteDetallePage({
@@ -45,6 +57,13 @@ export default async function ClienteDetallePage({
 
   const uso = await usoDelCliente(cliente.id);
 
+  // Lo que un borrado destruiría. Se cuenta acá para poder mostrarlo antes de
+  // pedir la confirmación: nadie debería confirmar sin ver el alcance.
+  const [conversaciones, mensajes] = await Promise.all([
+    prisma.conversacion.count({ where: { agente: { clienteId: cliente.id } } }),
+    prisma.mensaje.count({ where: { conversacion: { agente: { clienteId: cliente.id } } } }),
+  ]);
+
   const enLimite = limiteAlcanzado(cliente.agentes.length, cliente.plan.maxAgentes);
   const owner = cliente.usuarios.find((u) => u.rol === "CLIENTE_OWNER");
 
@@ -62,6 +81,13 @@ export default async function ClienteDetallePage({
       </header>
 
       <div className="space-y-6">
+        {cliente.archivadoAt && (
+          <div className="callout bg-neutral-100 px-4 py-3 text-sm">
+            <span className="font-semibold">Cliente archivado.</span> No aparece
+            en el listado ni en las métricas, y su bot no responde.
+          </div>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Plan</CardTitle>
@@ -72,7 +98,7 @@ export default async function ClienteDetallePage({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <BarraUso uso={uso} />
+            <BarraUso uso={uso} compacto />
 
             {uso.bloqueado && (
               <div className="callout bg-neutral-100 px-4 py-3">
@@ -90,6 +116,94 @@ export default async function ClienteDetallePage({
               planActualId={cliente.plan.id}
               planes={planes}
             />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle className="text-base">Facturación</CardTitle>
+              <CardDescription>
+                La suscripción se genera en Mercado Pago y el link se le manda al
+                cliente por fuera de Vibo. Acá se ve el resultado.
+              </CardDescription>
+            </div>
+            <EstadoPagoBadge estado={cliente.estadoPago} />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-neutral-500">Precio del plan</dt>
+                <dd className="tabular-nums">
+                  {Number(cliente.plan.precio) > 0 ? (
+                    moneda.format(Number(cliente.plan.precio))
+                  ) : (
+                    // Un plan en 0 no es gratis: es que nadie le puso precio.
+                    // Mercado Pago no puede cobrar sobre esto.
+                    <span className="text-vibo-acento">sin precio definido</span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-neutral-500">Próximo cobro</dt>
+                <dd>
+                  {cliente.fechaProximoCobro
+                    ? formatoFecha.format(cliente.fechaProximoCobro)
+                    : "—"}
+                </dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-xs text-neutral-500">Suscripción de Mercado Pago</dt>
+                <dd className="font-mono text-xs break-all">
+                  {cliente.mercadoPagoSubscriptionId ?? "— sin vincular —"}
+                </dd>
+              </div>
+            </dl>
+
+            {cliente.estadoPago === "EN_GRACIA" && cliente.graciaDesde && (
+              <div className="callout bg-neutral-100 px-4 py-3 text-sm">
+                En período de gracia desde el{" "}
+                {formatoFecha.format(cliente.graciaDesde)}. Al vencerse, sus
+                agentes se pausan automáticamente.
+              </div>
+            )}
+
+            {cliente.estadoPago === "VENCIDO" && (
+              <div className="callout bg-neutral-100 px-4 py-3 text-sm">
+                <span className="font-semibold">Servicio cortado por falta de pago.</span>{" "}
+                Sus agentes están pausados y el bot no responde.
+              </div>
+            )}
+
+            <div>
+              <MarcarPagadoForm
+                clienteId={cliente.id}
+                montoSugerido={Number(cliente.plan.precio)}
+                hayAgentesPausados={cliente.agentes.some(
+                  (a) => a.estado === "PAUSADO_POR_PAGO",
+                )}
+              />
+            </div>
+
+            {cliente.pagos.length > 0 && (
+              <div>
+                <p className="etiqueta mb-2 text-xs text-neutral-500">Últimos pagos</p>
+                <ul className="divide-y divide-neutral-200 text-sm">
+                  {cliente.pagos.map((pago) => (
+                    <li key={pago.id} className="flex items-center justify-between gap-3 py-2">
+                      <span>
+                        {formatoFecha.format(pago.fecha)}
+                        <span className="ml-2 text-xs text-neutral-500">
+                          {pago.origen === "MANUAL" ? "manual" : "Mercado Pago"}
+                          {pago.estado !== "APROBADO" && ` · ${pago.estado.toLowerCase()}`}
+                        </span>
+                      </span>
+                      <span className="tabular-nums">{moneda.format(Number(pago.monto))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -173,6 +287,41 @@ export default async function ClienteDetallePage({
                 ))}
               </ul>
             )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Notas internas</CardTitle>
+            <CardDescription>
+              Sólo las ve el equipo de Vibo. El cliente nunca accede a esto.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <NotasForm clienteId={cliente.id} notas={cliente.notasInternas} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Dar de baja</CardTitle>
+            <CardDescription>
+              Archivar conserva todo y se puede revertir. Eliminar es definitivo
+              y sólo se habilita si el cliente nunca tuvo un pago.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BajaClienteForm
+              clienteId={cliente.id}
+              nombre={cliente.nombre}
+              archivado={cliente.archivadoAt !== null}
+              alcance={{
+                usuarios: cliente.usuarios.length,
+                agentes: cliente.agentes.length,
+                conversaciones,
+                mensajes,
+                pagos: cliente._count.pagos,
+              }}
+            />
           </CardContent>
         </Card>
       </div>

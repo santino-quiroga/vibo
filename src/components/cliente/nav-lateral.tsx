@@ -11,16 +11,14 @@ import { cn } from "@/lib/utils";
 const SECCIONES: Array<{
   href: string;
   etiqueta: string;
-  activa: boolean;
   Icono: ComponentType<{ className?: string; strokeWidth?: number }>;
 }> = [
-  { href: "/dashboard", etiqueta: "Inicio", activa: true, Icono: LayoutDashboard },
-  { href: "/dashboard/agentes", etiqueta: "Agentes", activa: true, Icono: Bot },
-  { href: "/dashboard/turnos", etiqueta: "Turnos", activa: true, Icono: CalendarDays },
+  { href: "/dashboard", etiqueta: "Inicio", Icono: LayoutDashboard },
+  { href: "/dashboard/agentes", etiqueta: "Agentes", Icono: Bot },
+  { href: "/dashboard/turnos", etiqueta: "Turnos", Icono: CalendarDays },
   {
     href: "/dashboard/conversaciones",
     etiqueta: "Conversaciones",
-    activa: true,
     Icono: MessageSquare,
   },
 ];
@@ -31,33 +29,20 @@ export function NavLateral({ sinLeer = 0 }: { sinLeer?: number }) {
   return (
     <nav
       aria-label="Secciones"
-      // Riel limpio sobre el fondo de la app. En mobile es una fila que
-      // scrollea; en desktop, la columna izquierda del punto 5.
-      className="-mx-4 shrink-0 overflow-x-auto px-4 md:mx-0 md:w-48 md:overflow-visible md:px-0"
+      // 240px en desktop: el ancho que permite padding horizontal generoso sin
+      // apretar las etiquetas. En mobile es una fila que scrollea.
+      className="-mx-4 shrink-0 overflow-x-auto px-4 md:mx-0 md:w-60 md:overflow-visible md:px-0"
     >
-      <ul className="flex gap-1 md:flex-col md:gap-0.5">
+      <ul className="flex gap-1 md:flex-col md:gap-1">
         {SECCIONES.map((seccion) => {
-          // Activa en la ruta exacta y en sus sub-rutas (ej. el detalle de un
-          // agente o la sub-vista de horarios). "/dashboard" se compara exacto
+          // Activa en la ruta exacta y en sus sub-rutas (el detalle de un
+          // agente, la sub-vista de horarios). "/dashboard" se compara exacto
           // porque es prefijo de todas las demás.
           const actual =
             pathname === seccion.href ||
             (seccion.href !== "/dashboard" && pathname.startsWith(`${seccion.href}/`));
 
           const Icono = seccion.Icono;
-
-          if (!seccion.activa) {
-            return (
-              <li key={seccion.href}>
-                <span className="flex items-center gap-2.5 border-l-2 border-transparent px-3 py-2 text-sm whitespace-nowrap text-neutral-400">
-                  <Icono className="size-4 shrink-0 text-neutral-300" strokeWidth={2} />
-                  {seccion.etiqueta}
-                  <span className="etiqueta text-[10px] text-neutral-400">pronto</span>
-                </span>
-              </li>
-            );
-          }
-
           const mostrarSinLeer =
             seccion.href === "/dashboard/conversaciones" && sinLeer > 0;
 
@@ -67,26 +52,41 @@ export function NavLateral({ sinLeer = 0 }: { sinLeer?: number }) {
                 href={seccion.href}
                 aria-current={actual ? "page" : undefined}
                 className={cn(
-                  // El indicador activo es una fina línea roja a la izquierda y
-                  // el ícono en rojo — los únicos usos del rojo acá. El resto,
-                  // texto neutro que se oscurece al pasar por encima.
-                  "group/nav flex items-center gap-2.5 border-l-2 px-3 py-2 text-sm whitespace-nowrap transition-colors",
+                  "group/nav relative flex items-center gap-3 rounded-[10px] py-2.5 pr-4 pl-5 text-sm whitespace-nowrap",
+                  "transition-[background-color,color] duration-150 ease-out",
+                  "focus-visible:ring-vibo-rojo/40 focus-visible:ring-2 focus-visible:outline-none",
                   actual
-                    ? "border-vibo-rojo text-vibo-negro font-semibold"
-                    : "border-transparent text-neutral-500 hover:text-vibo-negro",
+                    ? "bg-vibo-rojo-suave text-foreground font-semibold"
+                    : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700",
                 )}
               >
+                {/* La barra roja del activo: 3px, centrada. Va en un span
+                    posicionado y no en border-left para que no empuje el
+                    contenido al cambiar de ítem, y para poder animar el alto. */}
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "bg-vibo-rojo absolute top-1/2 left-0 w-[3px] -translate-y-1/2 rounded-r-full",
+                    "transition-[height] duration-150 ease-out",
+                    actual ? "h-5" : "h-0",
+                  )}
+                />
+
                 <Icono
                   className={cn(
-                    "size-4 shrink-0 transition-colors",
-                    actual ? "text-vibo-rojo" : "text-neutral-400 group-hover/nav:text-vibo-negro",
+                    "size-[18px] shrink-0 transition-colors duration-150",
+                    actual
+                      ? "text-vibo-rojo"
+                      : "text-neutral-400 group-hover/nav:text-neutral-600",
                   )}
-                  strokeWidth={2}
+                  strokeWidth={1.75}
                 />
+
                 {seccion.etiqueta}
+
                 {mostrarSinLeer && (
                   <span
-                    className="bg-vibo-rojo text-vibo-blanco inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums"
+                    className="bg-vibo-rojo ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white tabular-nums"
                     aria-label={`${sinLeer} sin leer`}
                   >
                     {sinLeer > 99 ? "99+" : sinLeer}

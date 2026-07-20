@@ -1,9 +1,8 @@
-import { BotonLogout } from "@/components/boton-logout";
-import { BotonEnlace } from "@/components/ui/boton-enlace";
+import { HeaderPanel } from "@/components/cliente/header-panel";
 import { NavLateral } from "@/components/cliente/nav-lateral";
 import { FranjaDamero } from "@/components/marca/damero";
-import { Logo } from "@/components/marca/logo";
 import { contarSinLeer } from "@/lib/cliente/conversaciones";
+import { agentesDelCliente, clienteDeLaSesion } from "@/lib/cliente/datos";
 import { requerirClienteOwner } from "@/lib/dal";
 
 /**
@@ -21,28 +20,26 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const usuario = await requerirClienteOwner();
-  const sinLeer = await contarSinLeer();
+  const [sinLeer, cliente, agentes] = await Promise.all([
+    contarSinLeer(),
+    clienteDeLaSesion(),
+    agentesDelCliente(),
+  ]);
 
   return (
     <div className="flex min-h-svh flex-col">
       <FranjaDamero />
 
-      <header className="bg-card border-b border-black/10">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <Logo tamano="xs" />
-          <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-neutral-500 sm:inline">
-              {usuario.email}
-            </span>
-            <BotonEnlace variant="ghost" size="sm" href="/cuenta">
-              Cuenta
-            </BotonEnlace>
-            <BotonLogout />
-          </div>
-        </div>
-      </header>
+      <HeaderPanel
+        email={usuario.email}
+        cliente={cliente}
+        agentes={agentes}
+        sinLeer={sinLeer}
+      />
 
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 md:flex-row md:py-8">
+      {/* Grilla de 8px: 24px de gutter en mobile, 32px de aire vertical en
+          desktop y 40px entre el riel y el contenido. */}
+      <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-8 px-6 py-8 md:flex-row md:gap-10">
         <NavLateral sinLeer={sinLeer} />
         <main className="min-w-0 flex-1">{children}</main>
       </div>

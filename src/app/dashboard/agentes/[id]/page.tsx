@@ -7,9 +7,11 @@ import { TogglePausa } from "@/components/cliente/toggle-pausa";
 import { BotonEnlace } from "@/components/ui/boton-enlace";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { guardarCanchasClienteAction } from "@/app/dashboard/agentes/actions";
+import { TOPE_DIARIO, cupoRestante } from "@/lib/agentes/prueba";
 import { obtenerAgenteDelCliente } from "@/lib/cliente/agentes";
 import { requerirClienteOwner } from "@/lib/dal";
 
+import { ChatPrueba } from "./chat-prueba";
 import { ConfigAgenteForm } from "./config-form";
 
 export const metadata: Metadata = { title: "Agente | Vibo" };
@@ -25,6 +27,11 @@ export default async function AgenteDetallePage({
   const agente = await obtenerAgenteDelCliente(id);
   if (!agente) notFound();
 
+  // El cupo se lee acá y no adentro del chat: el componente es cliente y no
+  // puede tocar la base. Se pasa como valor inicial y él lo va actualizando con
+  // lo que devuelve cada envío.
+  const cupo = await cupoRestante(agente.id);
+
   return (
     <div className="space-y-6">
       <BotonEnlace variant="ghost" size="sm" href="/dashboard/agentes">
@@ -33,7 +40,7 @@ export default async function AgenteDetallePage({
 
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-serif text-3xl font-bold tracking-tight">{agente.nombre}</h1>
+          <h1 className="t-pagina">{agente.nombre}</h1>
           <p className="mt-1 text-sm text-neutral-500">{agente.deporte}</p>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -53,6 +60,25 @@ export default async function AgenteDetallePage({
         </CardHeader>
         <CardContent>
           <ConfigAgenteForm agente={agente} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Probar el agente</CardTitle>
+          <CardDescription>
+            Hablale como si fueras un cliente, para ver cómo responde con la
+            configuración de arriba. Es el lugar para probar un cambio antes de
+            que lo vea alguien de verdad.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChatPrueba
+            agenteId={agente.id}
+            cupoInicial={cupo}
+            tope={TOPE_DIARIO}
+            enConfiguracion={agente.estado === "EN_CONFIGURACION"}
+          />
         </CardContent>
       </Card>
 
