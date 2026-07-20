@@ -41,12 +41,19 @@ reusan tal cual.
 
 Sin tocar el diseño, frena el sangrado:
 
-- `Create a record` → **Options → Typecast: OFF**.
 - En Airtable, tabla Reservas, campo `Cancha`: **borrá la opción "Cualquiera"**.
 - Arreglá a mano la reserva que quedó en "Cualquiera" (asignale Cancha 1 o 2).
 
-Con typecast off, un valor mal formado vuelve a dar error visible (422) en vez de
-inventar una opción.
+> **Sobre el typecast — corrección.** La primera versión de este doc decía
+> "apagá el typecast" acá. **No lo apagues** (o volvé a encenderlo): el campo
+> `Fecha` de Airtable es de tipo fecha y necesita el typecast para parsear el
+> string `"2026-07-21"` — sin él, `Create a record` falla con *"Field Fecha
+> cannot accept the provided value"*.
+>
+> El typecast NO es el freno contra el "Cualquiera": ese freno es el nodo
+> `Asignar cancha` del Paso 2, que garantiza que `Cancha` sea siempre un valor
+> válido de la lista. Con ese nodo puesto, el LLM ya no escribe el campo, así que
+> el typecast no puede inventar opciones de cancha. Dejá el typecast **ON**.
 
 ---
 
@@ -118,7 +125,10 @@ mandó el LLM). Cambiar a la cancha que asignó el Code:
 ={{ $('Asignar cancha').first().json.cancha }}
 ```
 
-Y confirmá de nuevo que **Typecast está OFF** en ese nodo.
+El nombre del nodo tiene que coincidir **exacto** con `$('Asignar cancha')` —
+n8n lo crea como "Code"/"Code1", hay que renombrarlo. Y **Typecast queda ON**
+(ver la nota del Paso 1: lo necesita el campo Fecha; la cancha ya la valida el
+nodo Code).
 
 ---
 
