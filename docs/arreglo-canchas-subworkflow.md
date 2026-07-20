@@ -154,14 +154,58 @@ nodo Code).
 
 ---
 
-## PASO 5 (recomendado) — Que la lista de canchas venga de Vibo
+## PASO 5 — Que la cantidad de canchas venga de Vibo (mejora)
 
-Para no depender del fallback hardcodeado y respetar que Vibo es la fuente de
-verdad: en el workflow PADRE (PadelAI), en el tool `create_booking_safe`, agregá
-un input `CanchasValidas` mapeado a una expresión que arme la lista desde el
-contexto de Vibo. Con eso, agregar o quitar una cancha en Vibo se refleja solo,
-sin tocar n8n. (Si preferís, dejá el fallback del Code por ahora y esto queda
-para después — el arreglo funciona igual.)
+Hoy la cantidad de canchas está en dos constantes: `FALLBACK` en `Asignar cancha`
+y `TOTAL_CANCHAS` en `get_availability`. Funciona, pero hay que acordarse de
+tocarlas al clonar para otro complejo, y si en Vibo se agrega una cancha, n8n no
+se entera. Esta mejora hace que salga de Vibo (que ya sabe cuántas canchas tiene
+cada agente), así no se toca nunca más. Son 4 ediciones en n8n; ninguna en Vibo.
+
+**5a. Nodo `Vibo - Contexto cache` (parent) — exponer la lista.** En el `return`
+final (el del camino OK, no el del `if (!ctx)`), agregar dos campos:
+
+```javascript
+    canchasValidas: (Array.isArray(ctx.canchas) ? ctx.canchas.map((x) => 'Cancha ' + x.numero).join(',') : ''),
+    totalCanchas: (Array.isArray(ctx.canchas) ? ctx.canchas.length : 0),
+```
+
+(El `ctx` ya lo tiene: es la respuesta de `/contexto`. En el fallback sin ctx
+quedan vacío/0, y los subworkflows caen a su default — fail-open correcto.)
+
+**5b. Tool `create_booking_safe` (parent) — pasar la lista.** Agregar un input
+`CanchasValidas`, mapeado a una **expresión fija** (NO `$fromAI` — esto no lo
+decide el modelo):
+
+```
+={{ $('Vibo - Contexto cache').first().json.canchasValidas }}
+```
+
+El nodo `Asignar cancha` ya lee `req.CanchasValidas`, así que no hay que tocarlo.
+
+**5c. Tool `get_availability` (parent) — pasar el total.** Agregar un input
+`TotalCanchas`, también expresión fija:
+
+```
+={{ $('Vibo - Contexto cache').first().json.totalCanchas }}
+```
+
+**5d. Nodo `merge_slots` (subworkflow get_availability).** Cambiar la constante
+por la lectura del input, con la constante de respaldo por si llega 0/vacío
+(Vibo caído):
+
+```javascript
+const TOTAL_CANCHAS = Number($('When Executed by Another Workflow').first().json.TotalCanchas) || 2;
+```
+
+Con esto, agregar/quitar una cancha en Vibo se refleja solo, y clonar para otro
+complejo no requiere tocar código n8n. El `|| 2` y el `FALLBACK` del Code quedan
+como red: si Vibo no responde, el bot sigue con un default razonable en vez de
+cortar.
+
+**Probar 5:** cambiá temporalmente las canchas del agente en Vibo (agregá una 3ra
+en Agentes → Canchas), mandá un mensaje, y confirmá en el `_debug` de
+`Asignar cancha` que `validas` trae las 3. Volvé a dejarlo en 2 después.
 
 ---
 
