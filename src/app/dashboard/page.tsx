@@ -50,14 +50,26 @@ export default async function InicioPage({
   const sinAgentes = alcance.agentes.length === 0;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-serif text-3xl font-bold tracking-tight">Inicio</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          {alcance.seleccionado ? alcance.seleccionado.nombre : "Todas las sedes"}
-          {" · "}
-          {datos.etiqueta.toLowerCase()}
-        </p>
+    // 40px entre bloques: cada sección del punto 6 se lee como una unidad
+    // separada y no como una lista continua de tarjetas.
+    <div className="space-y-10">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="t-pagina">Inicio</h1>
+          <p className="mt-2 text-sm text-neutral-500">
+            {alcance.seleccionado ? alcance.seleccionado.nombre : "Todas las sedes"}
+            {" · "}
+            {datos.etiqueta.toLowerCase()}
+          </p>
+        </div>
+
+        {!sinAgentes && (
+          <BarraFiltros
+            rangoActual={rango}
+            accion="/dashboard"
+            sedeActual={alcance.seleccionado?.id ?? null}
+          />
+        )}
       </div>
 
       {sinAgentes ? (
@@ -72,16 +84,10 @@ export default async function InicioPage({
         </Card>
       ) : (
         <>
-          <BarraFiltros
-            agentes={alcance.agentes}
-            sedeActual={alcance.seleccionado?.id ?? null}
-            rangoActual={rango}
-            accion="/dashboard"
-          />
-
           <AvisoDegradado fallos={datos.fallos} descartes={datos.descartes} />
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section aria-label="Métricas">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Kpi
               titulo="Turnos reservados"
               valor={datos.sinDatos ? "—" : String(datos.turnos.actual)}
@@ -144,88 +150,98 @@ export default async function InicioPage({
                       : "Turnos confirmados × precio de cada cancha. Es una estimación, no tu facturación."
               }
             />
-          </div>
+            </div>
+          </section>
 
           {/* Tendencia de reservas + actividad de la IA. El gráfico depende de
               Airtable, así que sale de la fila si la lectura falló; el widget de
               actividad usa la base propia y se muestra igual. */}
-          <div className={cn("grid gap-4", !datos.sinDatos && "lg:grid-cols-3")}>
-            {!datos.sinDatos && (
-              <Card className="lg:col-span-2">
+          <section aria-label="Tendencia y actividad">
+            <div className={cn("grid gap-4", !datos.sinDatos && "lg:grid-cols-3")}>
+              {!datos.sinDatos && (
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Tendencia de reservas</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <GraficoTendencia datos={datos.tendencia} />
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Tendencia de reservas</CardTitle>
+                  <CardTitle>Actividad del agente</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <GraficoTendencia datos={datos.tendencia} />
+                  <ActividadAgente
+                    actividad={actividad}
+                    ultimoTurno={datos.ultimoTurnoBot}
+                  />
                 </CardContent>
               </Card>
-            )}
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Actividad del agente</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ActividadAgente actividad={actividad} ultimoTurno={datos.ultimoTurnoBot} />
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Estado del plan (requerimientos §6): fuera del bloque que depende
-              de Airtable, para que el uso y el aviso de límite se vean aunque la
-              lectura de turnos esté caída. */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Estado del plan</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <BarraUso uso={uso} />
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
           {/* Con la lectura caída, el heatmap sólo podría decir "no hay
               horarios cargados", que no es lo que pasó. El aviso de arriba ya
               explica el motivo real; una tarjeta vacía abajo sólo confunde. */}
           {!datos.sinDatos && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Ocupación y horarios pico</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <HeatmapOcupacion ocupacion={datos.ocupacion} />
-              </CardContent>
-            </Card>
+            <section aria-label="Ocupación">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ocupación y horarios pico</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <HeatmapOcupacion ocupacion={datos.ocupacion} />
+                </CardContent>
+              </Card>
+            </section>
           )}
 
-          {datos.ingresos.porCancha.length > 0 && (
+          {/* Estado del plan (requerimientos §6): fuera del bloque que depende
+              de Airtable, para que el uso y el aviso de límite se vean aunque la
+              lectura de turnos esté caída. */}
+          <section aria-label="Plan">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">
-                  De dónde salen los ingresos estimados
-                </CardTitle>
+                <CardTitle>Estado del plan</CardTitle>
               </CardHeader>
               <CardContent>
-                <ul className="divide-y divide-neutral-200 text-sm">
-                  {datos.ingresos.porCancha.map((cancha) => (
-                    <li
-                      key={cancha.numero}
-                      className="flex items-center justify-between gap-3 py-2"
-                    >
-                      <span>
-                        Cancha {cancha.numero}
-                        <span className="text-neutral-500">
-                          {" "}
-                          · {cancha.turnos} × {moneda.format(cancha.precio)}
-                        </span>
-                      </span>
-                      <span className="font-mono tabular-nums">
-                        {moneda.format(cancha.subtotal)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <BarraUso uso={uso} />
               </CardContent>
             </Card>
+          </section>
+
+          {datos.ingresos.porCancha.length > 0 && (
+            <section aria-label="Detalle de ingresos">
+              <Card>
+                <CardHeader>
+                  <CardTitle>De dónde salen los ingresos estimados</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="divide-y divide-neutral-200 text-sm">
+                    {datos.ingresos.porCancha.map((cancha) => (
+                      <li
+                        key={cancha.numero}
+                        className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                      >
+                        <span>
+                          Cancha {cancha.numero}
+                          <span className="text-neutral-400">
+                            {" "}
+                            · {cancha.turnos} × {moneda.format(cancha.precio)}
+                          </span>
+                        </span>
+                        <span className="font-medium tabular-nums">
+                          {moneda.format(cancha.subtotal)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            </section>
           )}
         </>
       )}

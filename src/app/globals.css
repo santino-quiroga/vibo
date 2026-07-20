@@ -3,19 +3,16 @@
 @import "shadcn/tailwind.css";
 
 /* ==========================================================================
-   Vibo — tokens derivados del manual de identidad visual
-   (docs/manual-identidad-visual-vibo.html)
+   Vibo — sistema visual
 
-   El manual define 4 colores y no admite otros. Todo lo que sigue sale de esos
-   4: los neutrales son la escala del negro de marca, y la rampa del heatmap va
-   del blanco roto al acento pasando por el rojo. No hay ningún color inventado.
+   Base SaaS premium: superficies casi blancas, bordes de muy bajo contraste,
+   sombras mínimas y mucho aire. La identidad de marca entra por micro-detalles
+   —el rojo en la navegación activa, en la acción primaria y en los indicadores—
+   y nunca como superficie grande.
 
-   Roles decididos con el cliente:
-   - negro    -> acción primaria y texto (es la superficie dominante del manual)
-   - rojo     -> acento de marca, estados activos
-   - acento   -> peligro y acciones destructivas
-   Sin esta separación, un botón principal rojo y un error rojo se confunden,
-   y nada alerta.
+   Todo el espaciado se apoya en una grilla de 8px: las utilidades van en
+   múltiplos pares (gap-2 = 8px, gap-4 = 16px, gap-6 = 24px, gap-8 = 32px) para
+   que nada quede a media grilla.
    ========================================================================== */
 
 @theme inline {
@@ -24,16 +21,31 @@
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --font-display: var(--font-display);
-  --font-heading: var(--font-display);
+  /* display, heading y serif resuelven a la misma Inter: si quedó algún
+     font-serif suelto en el código, cae en la tipografía del sistema y no en
+     la serif del navegador. */
+  --font-display: var(--font-sans);
+  --font-heading: var(--font-sans);
+  --font-serif: var(--font-sans);
 
-  /* Colores exactos del manual, disponibles como utilidades */
+  /* Identidad */
   --color-vibo-negro: var(--vibo-negro);
   --color-vibo-rojo: var(--vibo-rojo);
+  --color-vibo-rojo-suave: var(--vibo-rojo-suave);
   --color-vibo-acento: var(--vibo-acento);
   --color-vibo-blanco: var(--vibo-blanco);
 
-  /* Neutrales: escala del negro de marca */
+  /* Semánticos. Todos desaturados a propósito: informan sin gritar. */
+  --color-exito: var(--exito);
+  --color-exito-suave: var(--exito-suave);
+  --color-info: var(--info);
+  --color-info-suave: var(--info-suave);
+  --color-warning: var(--warning);
+  --color-warning-suave: var(--warning-suave);
+
+  /* Neutrales mapeados a la escala de texto del sistema: neutral-500 es el
+     secundario (#666) y neutral-400 el terciario (#999), así lo que ya los
+     usaba queda alineado sin tocarlo. */
   --color-neutral-50: var(--n-50);
   --color-neutral-100: var(--n-100);
   --color-neutral-200: var(--n-200);
@@ -61,8 +73,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
 
-  /* Rampa secuencial para el heatmap de ocupación (sprint 3).
-     Va de menos a más intensidad: blanco roto -> rojo -> acento. */
+  /* Rampa del heatmap: del fondo de la página al acento de marca. */
   --color-ocupacion-0: var(--ocup-0);
   --color-ocupacion-1: var(--ocup-1);
   --color-ocupacion-2: var(--ocup-2);
@@ -70,74 +81,92 @@
   --color-ocupacion-4: var(--ocup-4);
   --color-ocupacion-5: var(--ocup-5);
 
-  --radius-sm: calc(var(--radius) * 0.5);
-  --radius-md: calc(var(--radius) * 0.75);
+  /* Radios: 14px en tarjetas, 10px en controles. Nada cuadrado; píldora sólo
+     donde el elemento es un punto, un chip o un contador. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.5);
-  --radius-2xl: calc(var(--radius) * 2);
-  --radius-3xl: calc(var(--radius) * 2.5);
-  --radius-4xl: calc(var(--radius) * 3);
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+  --radius-3xl: 26px;
+  --radius-4xl: 30px;
 }
 
 :root {
-  /* --- Los 4 colores del manual, textuales --- */
-  --vibo-negro: #0f0f0f;
+  /* --- Identidad --- */
+  --vibo-negro: #111111;
   --vibo-rojo: #e0202c;
+  --vibo-rojo-suave: #fdf1f2; /* fondo del ítem activo del sidebar */
   --vibo-acento: #7a1024;
-  --vibo-blanco: #f5f5f5;
+  --vibo-blanco: #fafafa;
 
-  /* --- Neutrales derivados del negro de marca --- */
-  --n-50: #f5f5f5; /* = blanco roto del manual */
-  --n-100: #ededed;
-  --n-200: #dadada; /* el gris sobre el que el manual apoya sus páginas */
-  --n-300: #c4c4c4;
-  --n-400: #8a8a8a;
-  --n-500: #6b6b6b;
-  --n-600: #545454;
-  --n-700: #3d3d3d;
-  --n-900: #0f0f0f;
+  /* --- Escala de grises ---
+     Tres niveles de texto y nada más: principal, secundario, terciario. */
+  --n-50: #fafafa;
+  --n-100: #f4f4f4;
+  --n-200: #e8e8e8; /* = borde del sistema */
+  --n-300: #dcdcdc;
+  --n-400: #999999; /* texto terciario */
+  --n-500: #666666; /* texto secundario */
+  --n-600: #555555;
+  --n-700: #333333;
+  --n-900: #111111; /* texto principal */
 
-  /* --- Superficies ---
-     Base limpia estilo SaaS técnico: el fondo de toda la app es el blanco roto
-     de marca (#F5F5F5) y las tarjetas son blanco puro, para una elevación sutil
-     por contraste, sin sombras pesadas. */
-  --background: var(--vibo-blanco);
-  --foreground: var(--vibo-negro);
+  /* --- Superficies --- */
+  --background: #fafafa;
+  --foreground: #111111;
   --card: #ffffff;
-  --card-foreground: var(--vibo-negro);
+  --card-foreground: #111111;
   --popover: #ffffff;
-  --popover-foreground: var(--vibo-negro);
+  --popover-foreground: #111111;
 
   /* --- Acciones --- */
-  --primary: var(--vibo-negro);
-  --primary-foreground: var(--vibo-blanco);
-  --secondary: var(--n-200);
-  --secondary-foreground: var(--vibo-negro);
-  --muted: var(--n-100);
-  --muted-foreground: var(--n-500);
-  --accent: var(--vibo-rojo);
-  --accent-foreground: var(--vibo-blanco);
+  --primary: var(--vibo-rojo);
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f4;
+  --secondary-foreground: #111111;
+  --muted: #f4f4f4;
+  --muted-foreground: #666666;
+  --accent: #f4f4f4;
+  --accent-foreground: #111111;
   --destructive: var(--vibo-acento);
 
-  --border: var(--n-300);
-  --input: var(--n-300);
+  --border: #e8e8e8;
+  --input: #e8e8e8;
   --ring: var(--vibo-rojo);
 
+  /* --- Semánticos ---
+     Verde, azul y ámbar a baja saturación, con su versión de fondo para chips
+     y avisos. Ninguno compite con el rojo de marca. */
+  --exito: #15905d;
+  --exito-suave: #eaf5ef;
+  --info: #3d72b4;
+  --info-suave: #eef3f9;
+  --warning: #b5822a;
+  --warning-suave: #fbf4e8;
+
   /* --- Rampa de ocupación ---
-     Interpolada entre los colores del manual. Es secuencial de verdad: cada
-     paso baja en luminosidad, así que se lee incluso en escala de grises o
-     con daltonismo, donde el tono solo no alcanza. */
-  --ocup-0: #f5f5f5;
-  --ocup-1: #f8cdd0;
-  --ocup-2: #f09aa1;
-  --ocup-3: #e2545f;
-  --ocup-4: #c01f2f;
+     Secuencial de verdad: cada paso baja en luminosidad, así que se lee en
+     escala de grises y con daltonismo, donde el tono solo no alcanza. */
+  --ocup-0: #fafafa;
+  --ocup-1: #fbdfe1;
+  --ocup-2: #f4aab0;
+  --ocup-3: #e86a74;
+  --ocup-4: #c9202f;
   --ocup-5: #7a1024;
 
-  /* Aspecto técnico: esquinas casi rectas. Radio base mínimo (3px), nunca
-     redondeos marcados. Los pocos elementos redondos (puntos, pills de
-     contador) usan rounded-full, que no deriva de este token. */
-  --radius: 0.1875rem;
+  --radius: 14px;
+
+  /* --- Elevación ---
+     Dos niveles, los dos casi invisibles. La jerarquía la da el aire, no la
+     sombra. */
+  --sombra-card:
+    0 1px 2px rgba(17, 17, 17, 0.04), 0 1px 3px rgba(17, 17, 17, 0.03);
+  --sombra-flotante:
+    0 4px 12px rgba(17, 17, 17, 0.06), 0 2px 4px rgba(17, 17, 17, 0.04);
+
+  /* Curva y duración compartidas por todas las microinteracciones. */
+  --transicion: 160ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @layer base {
@@ -150,18 +179,76 @@
   html {
     @apply font-sans;
   }
-
-  /* Archivo es la voz del 95% de la interfaz. Fraunces (var(--font-display))
-     queda RESERVADA para los números grandes de los KPIs y el título principal
-     de cada vista, y se aplica solo donde corresponde con la clase font-serif —
-     no hay regla global de headings, para no ensuciar la UI con serif. */
 }
 
 @layer components {
+  /* --- Jerarquía tipográfica ---
+     Inter para todo, sin serif en ningún lado. Tamaños fijos y no responsivos:
+     el panel es una herramienta de trabajo, no una landing. */
+  .t-pagina {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  .t-seccion {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+  }
+  .t-card {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  /* La métrica es el elemento visual más importante del panel. */
+  .t-metrica {
+    font-size: 40px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- Tarjeta ---
+     Blanco puro sobre el gris de la página, borde de bajísimo contraste y una
+     sombra que casi no se ve. La separación la hace el aire, no el peso. */
+  .tarjeta {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--sombra-card);
+  }
+
+  /* --- Etiqueta ---
+     Mayúsculas con tracking abierto para los rótulos de dato. 12/500. */
+  .etiqueta {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* --- Ticket ---
+     Píldora de estado: fondo suave y texto del mismo tono. Informa sin pesar.
+     El color lo pone quien la usa. */
+  .ticket {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    padding: 5px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
   /* --- Damero ---
-     El motivo de la marca. Es el elemento firma de la interfaz: aparece en la
-     franja superior de cada página y en la costura del login, y en ningún
-     otro lado. Repetirlo en cada tarjeta lo convertiría en ruido. */
+     El motivo de la marca, reducido a una línea de 4px arriba de todo. Es el
+     único lugar donde aparece: repetido sería ruido. */
   .damero {
     background-color: var(--damero-c1, var(--vibo-negro));
     background-image: linear-gradient(
@@ -182,96 +269,48 @@
       );
     background-position:
       0 0,
-      calc(var(--damero-sq, 12px) / 2) calc(var(--damero-sq, 12px) / 2);
-    background-size: var(--damero-sq, 12px) var(--damero-sq, 12px);
-  }
-
-  /* --- Etiqueta ---
-     "Etiquetas y captions en mayúsculas con tracking abierto" (manual, p2). */
-  .etiqueta {
-    font-family: var(--font-sans);
-    font-weight: 800;
-    font-size: 0.625rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-
-  /* --- Sombra dura ---
-     Desplazamiento sólido sin desenfoque, la firma del manual. Se reserva para
-     UN elemento por pantalla (la costura del login), nunca en las tarjetas del
-     dashboard, que van con borde sutil. */
-  .sombra-dura {
-    box-shadow: 4px 4px 0 var(--vibo-negro);
-  }
-
-  /* --- Tarjeta ---
-     Contenedor limpio: fondo blanco, separado del fondo por un borde de 1px
-     súper sutil y una sombra mínima y elegante. Sin bordes gruesos ni sombras
-     desfasadas. Lo usan Card y las tarjetas de métricas. */
-  .tarjeta {
-    background: var(--card);
-    border: 1px solid rgba(15, 15, 15, 0.1);
-    border-radius: var(--radius);
-    box-shadow: 0 1px 2px rgba(15, 15, 15, 0.05);
-  }
-
-  /* --- Ticket ---
-     Etiqueta de estado cruda: Archivo en mayúsculas peso Bold, tracking, fondo
-     sólido (negro por defecto; rojo solo para alertas) y texto blanco, padding
-     ajustado. El color de fondo lo pone quien la usa. */
-  .ticket {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    font-family: var(--font-sans);
-    font-weight: 700;
-    font-size: 0.625rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    line-height: 1;
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius);
+      calc(var(--damero-sq, 8px) / 2) calc(var(--damero-sq, 8px) / 2);
+    background-size: var(--damero-sq, 8px) var(--damero-sq, 8px);
   }
 
   /* --- Callout ---
-     "La barra roja izquierda es parte del sistema, no es opcional". */
+     Barra izquierda de 3px. El color lo define el tipo de aviso. */
   .callout {
     border-left: 3px solid var(--vibo-rojo);
   }
 
   /* --- Punto en vivo ---
-     Un halo rojo que late alrededor del punto de estado del agente, guiño al
-     asterisco de la marca. Marca "esto está pasando ahora". El halo va en un
-     ::before para no afectar el layout del punto. Se apaga con
-     prefers-reduced-motion (ver la regla más abajo). */
+     Halo que late alrededor del indicador de estado del agente: marca "esto
+     está pasando ahora". Toma el color del texto, así sirve para cualquier
+     estado. Se apaga con prefers-reduced-motion. */
   .pulso-vivo::before {
     content: "";
     position: absolute;
     inset: -3px;
     border-radius: 9999px;
-    background: var(--vibo-rojo);
-    animation: pulso-vivo 2s ease-out infinite;
+    background: currentColor;
+    animation: pulso-vivo 2.4s ease-out infinite;
   }
 
   @keyframes pulso-vivo {
     0% {
       transform: scale(0.7);
-      opacity: 0.5;
+      opacity: 0.4;
     }
     100% {
-      transform: scale(1.9);
+      transform: scale(2);
       opacity: 0;
     }
   }
 
   /* --- Rayado ---
      Marca "acá no hay dato", distinto de "el dato es cero". Lo usa el heatmap
-     de ocupación para las franjas sin horarios activos: sin esto, una hora en
-     la que el complejo ni abre se vería igual que una que no vendió nada, y
-     son decisiones de precio opuestas.
+     para las franjas sin horarios activos: sin esto, una hora en la que el
+     complejo ni abre se vería igual que una que no vendió nada, y son
+     decisiones de precio opuestas.
 
-     Va rayado y no un gris más: la diferencia tiene que leerse por textura y
-     no sólo por tono, que es lo que la hace visible con daltonismo o con el
+     Va rayado y no un gris más porque la diferencia tiene que leerse por
+     textura y no sólo por tono — así se distingue con daltonismo o con el
      celular al sol. */
   .rayado {
     background-image: repeating-linear-gradient(
@@ -281,6 +320,13 @@
       var(--n-200) 3px,
       var(--n-200) 4px
     );
+  }
+
+  /* --- Sombra dura ---
+     Sobrevive sólo en la costura del login, que es una pantalla de marca y no
+     parte del panel. No usarla en el dashboard. */
+  .sombra-dura {
+    box-shadow: 4px 4px 0 var(--vibo-negro);
   }
 }
 

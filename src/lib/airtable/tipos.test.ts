@@ -93,6 +93,14 @@ describe("parsearEstado", () => {
     assert.equal(parsearEstado("Pendiente de seña"), "PENDIENTE_SENIA");
   });
 
+  it("mapea los estados que usan las bases reales", () => {
+    // La base del primer cliente usa estas cuatro etiquetas, no las del doc.
+    // Un estado que caiga en null deja el turno fuera de TODOS los KPIs sin
+    // avisar, así que las cuatro tienen que resolver.
+    assert.equal(parsearEstado("Pendiente"), "PENDIENTE_SENIA");
+    assert.equal(parsearEstado("Señada"), "CONFIRMADA", "ya pagó la seña: cuenta como ingreso");
+  });
+
   it("no adivina un estado desconocido", () => {
     assert.equal(parsearEstado("confirmado"), null);
     assert.equal(parsearEstado("Pendiente de sena"), null, "sin la ñ no es el mismo valor");

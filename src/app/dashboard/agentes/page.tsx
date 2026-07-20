@@ -28,7 +28,7 @@ export default async function AgentesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-bold tracking-tight">Agentes</h1>
+        <h1 className="t-pagina">Agentes</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Tus sedes y cómo está configurado cada agente. Usás {agentes.length} de{" "}
           {maxAgentes} {maxAgentes === 1 ? "sede" : "sedes"} del plan{" "}

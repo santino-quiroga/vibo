@@ -1,3 +1,4 @@
+import type { EstadoAgente } from "@/generated/prisma/enums";
 import "server-only";
 
 import { cache } from "react";
@@ -20,7 +21,7 @@ export type AgenteCard = {
   id: string;
   nombre: string;
   deporte: string;
-  estado: "ACTIVO" | "PAUSADO_MANUAL" | "PAUSADO_LIMITE";
+  estado: EstadoAgente;
   /** El canal está configurado (tiene instancia de Evolution). No es un chequeo
    *  de conexión en vivo — eso llega cuando se conecte el agente real. */
   canalConfigurado: boolean;
@@ -77,7 +78,7 @@ export type AgenteDetalle = {
   id: string;
   nombre: string;
   deporte: string;
-  estado: "ACTIVO" | "PAUSADO_MANUAL" | "PAUSADO_LIMITE";
+  estado: EstadoAgente;
   direccion: string | null;
   telefonoContacto: string | null;
   tono: string | null;

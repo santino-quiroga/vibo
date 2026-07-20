@@ -380,6 +380,7 @@ Al probar el MVP salieron dos huecos reales del alcance original, no mejoras nue
 
 1. **Sección Agentes sin implementar** — estaba en el alcance desde el punto 7 del doc de requerimientos (listado + detalle: info del negocio, canchas/precios, prompt, reglas, bot activo/pausado). Hay que completarla antes de considerar el MVP cerrado.
 2. **Turnos solo muestra reservas, no gestiona horarios disponibles** — ver punto 8.0 del doc de requerimientos (agregado tras esta revisión). Se suma como parte de la misma sección Turnos, mismo patrón de integración con Airtable que ya existe para Reservas.
+3. **Turnos: falta cancelar/reprogramar y falta el calendario operativo** — detectado en revisión de la implementación de v1. Cancelar/reprogramar ya estaba en el alcance original (punto 8 del doc de requerimientos) y quedó pendiente. El calendario operativo (nombre + cancha por turno, día/semana) es distinto del heatmap de ocupación de Inicio — se aclaró la diferencia en el doc de requerimientos para que no se vuelvan a confundir.
 
 Ninguno de los dos requiere nuevas decisiones de arquitectura — ambos usan la capa de integración con Airtable ya definida (sección 4.1) y el modelo de datos ya existente (`Cancha`, `Agente`). Es trabajo de UI + endpoints faltantes, no diseño nuevo.
 

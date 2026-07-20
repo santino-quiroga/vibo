@@ -2,6 +2,7 @@ import "server-only";
 
 import { unstable_cache } from "next/cache";
 
+import { limpiarErrorIntegracion, registrarErrorIntegracion } from "@/lib/admin/salud";
 import { descifrar } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 
@@ -9,10 +10,12 @@ import {
   CAMPO_RESERVA,
   CAMPO_SLOT,
   DIAS_SEMANA,
+  ETIQUETAS_ESCRITURA,
   TABLA,
   indiceDeDia,
   nombreCancha,
   parsearEstado,
+  type EstadoReserva,
 } from "./campos";
 import {
   ErrorAirtable,
@@ -33,7 +36,9 @@ import {
 } from "./tipos";
 
 /**
- * Capa de lectura de Airtable.
+ * Capa de acceso a Airtable: lectura de Reservas y Slots, y las escrituras que
+ * el §8/§8.0 habilitan sobre ambas (cancelar/reprogramar un turno, alta y
+ * edición de horarios).
  *
  * **Esta capa no autoriza.** Recibe un `agenteId` ya autorizado por el DAL y
  * confía en él. Es a propósito: `unstable_cache` no puede leer cookies, así que
@@ -167,22 +172,51 @@ function filtroPorRango(desde: FechaCalendario, hasta: FechaCalendario): string 
   return `AND(NOT(IS_BEFORE(${campo}, '${desde}')), NOT(IS_AFTER(${campo}, '${hasta}')))`;
 }
 
+/**
+ * Corre una lectura sellando el resultado en la salud del agente (SDD v2 §5).
+ *
+ * El sello es lo que le permite al admin ver qué cliente tiene la integración
+ * rota sin esperar el reclamo. Va acá y no en el cliente HTTP porque es acá
+ * donde se sabe de qué agente se trata.
+ *
+ * El error se re-lanza igual: esto observa, no cambia el comportamiento — la UI
+ * sigue mostrando su estado degradado como siempre.
+ */
+async function conSalud<T>(agenteId: string, leer: () => Promise<T>): Promise<T> {
+  try {
+    const resultado = await leer();
+    limpiarErrorIntegracion(agenteId);
+    return resultado;
+  } catch (error) {
+    const mensaje =
+      error instanceof ErrorAirtable
+        ? `${error.motivo}: ${error.message}`
+        : String(error);
+    registrarErrorIntegracion(agenteId, "airtable", mensaje);
+    throw error;
+  }
+}
+
 async function traerReservas(
   agenteId: string,
   desde: FechaCalendario,
   hasta: FechaCalendario,
 ): Promise<Lectura<Reserva>> {
-  const config = await credencialesDe(agenteId);
-  const registros = await listarRegistros(config, TABLA.reservas, {
-    filterByFormula: filtroPorRango(desde, hasta),
+  return conSalud(agenteId, async () => {
+    const config = await credencialesDe(agenteId);
+    const registros = await listarRegistros(config, TABLA.reservas, {
+      filterByFormula: filtroPorRango(desde, hasta),
+    });
+    return recolectar(registros, mapearReserva);
   });
-  return recolectar(registros, mapearReserva);
 }
 
 async function traerSlots(agenteId: string): Promise<Lectura<Slot>> {
-  const config = await credencialesDe(agenteId);
-  const registros = await listarRegistros(config, TABLA.slots);
-  return recolectar(registros, mapearSlot);
+  return conSalud(agenteId, async () => {
+    const config = await credencialesDe(agenteId);
+    const registros = await listarRegistros(config, TABLA.slots);
+    return recolectar(registros, mapearSlot);
+  });
 }
 
 /**
@@ -233,6 +267,19 @@ export function tagSlots(agenteId: string): string {
   return `airtable-slots-${agenteId}`;
 }
 
+/**
+ * El tag de caché de las reservas de un agente, para el mismo uso que `tagSlots`:
+ * después de cancelar o reprogramar un turno, la lista tiene que mostrar el
+ * cambio ya mismo y no esperar los 15s del TTL.
+ *
+ * Invalida TODOS los rangos del agente a la vez, no sólo el que se estaba
+ * mirando: reprogramar puede mover un turno de un período a otro, así que dejar
+ * vivo el caché de los demás rangos mostraría el turno en los dos lados.
+ */
+export function tagReservas(agenteId: string): string {
+  return `airtable-reservas-${agenteId}`;
+}
+
 export type NuevoSlot = {
   nombre: string;
   horaInicioMin: number;
@@ -277,5 +324,154 @@ export async function cambiarActivoSlot(
   const config = await credencialesDe(agenteId);
   await actualizarRegistro(config, TABLA.slots, recordId, {
     [CAMPO_SLOT.activo]: activo,
+  });
+}
+
+/**
+ * Edita un slot existente (requerimientos §8.0: "crear, editar y desactivar").
+ *
+ * No toca `Activo`: eso lo maneja `cambiarActivoSlot`, que es una acción de un
+ * click aparte. Editar un horario y desactivarlo son dos decisiones distintas y
+ * mezclarlas haría que guardar el formulario reactive sin querer un slot que el
+ * dueño había dado de baja.
+ */
+export async function editarSlot(
+  agenteId: string,
+  recordId: string,
+  slot: NuevoSlot,
+): Promise<void> {
+  const config = await credencialesDe(agenteId);
+
+  await actualizarRegistro(config, TABLA.slots, recordId, {
+    [CAMPO_SLOT.nombre]: slot.nombre,
+    [CAMPO_SLOT.horaInicio]: formatearHora(slot.horaInicioMin),
+    [CAMPO_SLOT.duracion]: slot.duracionMin,
+    [CAMPO_SLOT.diasActivos]: slot.diasActivos.map((d) => DIAS_SEMANA[d]),
+    [CAMPO_SLOT.cancha]: slot.canchas.map((n) => nombreCancha(n)),
+  });
+}
+
+export type NuevaReserva = {
+  nombre: string;
+  telefono: string | null;
+  fecha: FechaCalendario;
+  horaInicioMin: number;
+  /** Número de cancha; se traduce a "Cancha N". */
+  cancha: number;
+  estado: EstadoReserva;
+  montoSenia: number | null;
+  notas: string | null;
+};
+
+/**
+ * Escribe probando las etiquetas de estado candidatas, en orden.
+ *
+ * Sólo reintenta ante `datos_invalidos` (el 422 de "esa opción no existe en el
+ * select"), y sólo mientras queden candidatas. Cualquier otro error —auth, red,
+ * rate— corta al primer intento: insistir con otra etiqueta no lo arreglaría y
+ * sólo gastaría rate limit.
+ *
+ * Ver `ETIQUETAS_ESCRITURA`: existen dos vocabularios de estado en las bases
+ * reales y el pendiente no coincide entre ellos.
+ */
+async function escribirConEstado(
+  escribir: (etiqueta: string) => Promise<unknown>,
+  estado: EstadoReserva,
+): Promise<void> {
+  const candidatas = ETIQUETAS_ESCRITURA[estado];
+
+  for (let i = 0; i < candidatas.length; i++) {
+    try {
+      await escribir(candidatas[i]);
+      return;
+    } catch (error) {
+      const ultima = i === candidatas.length - 1;
+      const esOpcionInvalida =
+        error instanceof ErrorAirtable && error.motivo === "datos_invalidos";
+      if (ultima || !esOpcionInvalida) throw error;
+    }
+  }
+}
+
+/**
+ * Crea una reserva cargada a mano por el dueño.
+ *
+ * `Creada por bot` va en false, que es exactamente para lo que existe ese campo
+ * (§8.1): distingue lo que agendó el agente de lo que se cargó al mostrador. No
+ * es cosmético — la tasa de conversión de Inicio cuenta sólo los turnos del
+ * bot, así que marcar esto mal inflaría el KPI con ventas que no salieron de
+ * ninguna conversación.
+ */
+export async function crearReserva(
+  agenteId: string,
+  reserva: NuevaReserva,
+): Promise<void> {
+  const config = await credencialesDe(agenteId);
+
+  await escribirConEstado(
+    (etiquetaEstado) =>
+      crearRegistro(config, TABLA.reservas, {
+        [CAMPO_RESERVA.nombre]: reserva.nombre,
+        ...(reserva.telefono ? { [CAMPO_RESERVA.telefono]: reserva.telefono } : {}),
+        [CAMPO_RESERVA.fecha]: reserva.fecha,
+        [CAMPO_RESERVA.horaInicio]: formatearHora(reserva.horaInicioMin),
+        [CAMPO_RESERVA.cancha]: nombreCancha(reserva.cancha),
+        [CAMPO_RESERVA.estado]: etiquetaEstado,
+        ...(reserva.montoSenia !== null
+          ? { [CAMPO_RESERVA.montoSenia]: reserva.montoSenia }
+          : {}),
+        ...(reserva.notas ? { [CAMPO_RESERVA.notas]: reserva.notas } : {}),
+        [CAMPO_RESERVA.creadaPorBot]: false,
+      }),
+    reserva.estado,
+  );
+}
+
+/**
+ * Cancela un turno (requerimientos §8, SDD §4.1 "Escritura").
+ *
+ * Escribe `Estado → Cancelada` en la reserva; no borra el registro. Es a
+ * propósito: la reserva cancelada sigue siendo información del negocio (el
+ * contacto reservó y se dio de baja) y además los KPIs la excluyen por estado,
+ * no por ausencia. Borrarla haría desaparecer el hecho.
+ *
+ * Con `typecast: false` (ver cliente), si la base de un cliente no tuviera la
+ * opción "Cancelada" en su single select, esto falla con un error visible en vez
+ * de inventar una opción nueva.
+ */
+export async function cancelarReserva(agenteId: string, recordId: string): Promise<void> {
+  const config = await credencialesDe(agenteId);
+  // "Cancelada" existe en los dos vocabularios relevados, pero se pasa por el
+  // mismo camino que el alta para no tener dos formas distintas de escribir un
+  // estado si mañana aparece una base con otra etiqueta.
+  await escribirConEstado(
+    (etiquetaEstado) =>
+      actualizarRegistro(config, TABLA.reservas, recordId, {
+        [CAMPO_RESERVA.estado]: etiquetaEstado,
+      }),
+    "CANCELADA",
+  );
+}
+
+/**
+ * Reprograma un turno: nueva fecha y/o nueva hora de inicio.
+ *
+ * No toca el estado. Reprogramar no confirma un turno que estaba pendiente de
+ * seña ni revive uno cancelado — sólo lo mueve de horario, que es lo que pide el
+ * §8. Cambiar el estado de paso sería una decisión de negocio que nadie tomó.
+ *
+ * La hora se escribe como texto "HH:MM", igual que en el alta de slots: en las
+ * bases relevadas "Hora inicio" es un campo de texto, no un Duration ni un Date
+ * con hora (ver la nota de formatos en `crearSlot`).
+ */
+export async function reprogramarReserva(
+  agenteId: string,
+  recordId: string,
+  destino: { fecha: FechaCalendario; horaInicioMin: number },
+): Promise<void> {
+  const config = await credencialesDe(agenteId);
+  await actualizarRegistro(config, TABLA.reservas, recordId, {
+    [CAMPO_RESERVA.fecha]: destino.fecha,
+    [CAMPO_RESERVA.horaInicio]: formatearHora(destino.horaInicioMin),
   });
 }

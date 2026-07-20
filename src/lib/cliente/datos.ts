@@ -2,6 +2,8 @@ import "server-only";
 
 import { cache } from "react";
 
+import type { EstadoAgente } from "@/generated/prisma/enums";
+
 import { DIAS_SEMANA, numeroDeCancha } from "@/lib/airtable/campos";
 import { ErrorAirtable } from "@/lib/airtable/cliente";
 import {
@@ -22,7 +24,15 @@ import {
   type CanchaConfig,
   type Periodo,
 } from "@/lib/kpis";
-import { dentroDe, rangoCompleto, resolverPeriodo, type ClaveRango } from "@/lib/periodos";
+import {
+  dentroDe,
+  hoyEnArgentina,
+  inicioDeSemana,
+  rangoCompleto,
+  resolverPeriodo,
+  sumarDias,
+  type ClaveRango,
+} from "@/lib/periodos";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -38,8 +48,23 @@ export type AgenteEnAlcance = {
   id: string;
   nombre: string;
   deporte: string;
-  estado: "ACTIVO" | "PAUSADO_MANUAL" | "PAUSADO_LIMITE";
+  estado: EstadoAgente;
 };
+
+export type ClienteDeSesion = {
+  nombre: string;
+  plan: string;
+};
+
+/** El complejo de la sesión, para el header (nombre de empresa y plan). */
+export const clienteDeLaSesion = cache(async (): Promise<ClienteDeSesion> => {
+  const { clienteId } = await requerirClienteOwner();
+  const cliente = await prisma.cliente.findUniqueOrThrow({
+    where: { id: clienteId },
+    select: { nombre: true, plan: { select: { nombre: true } } },
+  });
+  return { nombre: cliente.nombre, plan: cliente.plan.nombre };
+});
 
 /** Los agentes del cliente de la sesión, y sólo esos. */
 export const agentesDelCliente = cache(async (): Promise<AgenteEnAlcance[]> => {
@@ -99,8 +124,11 @@ async function canchasDe(agenteIds: string[]): Promise<Map<string, CanchaConfig[
 /** Un agente cuyos datos no se pudieron leer, para decirlo sin romper la página. */
 export type FalloAgente = { agente: string; mensaje: string };
 
+/** Una reserva junto con la sede de la que salió, ya que `traerCrudos` aplana varias. */
+export type ReservaConAgente = Reserva & { agenteId: string };
+
 type DatosCrudos = {
-  reservas: Reserva[];
+  reservas: ReservaConAgente[];
   slots: Slot[];
   canchas: CanchaConfig[];
   descartes: number;
@@ -158,7 +186,9 @@ async function traerCrudos(
     }
 
     const { reservas, slots } = resultado.value;
-    crudos.reservas.push(...reservas.filas);
+    crudos.reservas.push(
+      ...reservas.filas.map((fila) => ({ ...fila, agenteId: agente.id })),
+    );
     crudos.slots.push(...slots.filas);
     crudos.canchas.push(...(canchasPorAgente.get(agente.id) ?? []));
     crudos.descartes += reservas.descartes.length + slots.descartes.length;
@@ -316,6 +346,8 @@ async function contarConversaciones(agenteIds: string[], periodo: Periodo): Prom
 }
 
 export type TurnoListado = Reserva & {
+  /** La sede dueña del turno: es la base de Airtable contra la que se escribe. */
+  agenteId: string;
   agenteNombre: string;
   precio: number | null;
 };
@@ -383,6 +415,7 @@ export async function datosDeTurnos(
       const numero = reserva.cancha ? numeroDeCancha(reserva.cancha) : null;
       turnos.push({
         ...reserva,
+        agenteId: agente.id,
         agenteNombre: agente.nombre,
         // null y no 0: "esta cancha no tiene precio configurado" no es "sale
         // gratis". La UI los muestra distinto.
@@ -402,4 +435,298 @@ export async function datosDeTurnos(
   ].sort();
 
   return { turnos, fallos, descartes, canchasDisponibles };
+}
+
+/** Una sede con sus canchas configuradas, para el alta manual de un turno. */
+export type SedeParaAlta = {
+  id: string;
+  nombre: string;
+  /** Números de cancha configurados en Vibo; se escriben como "Cancha N". */
+  canchas: number[];
+};
+
+/**
+ * Las sedes del cliente con sus canchas, para el formulario de alta.
+ *
+ * Las canchas salen de la config de Vibo y no de los turnos existentes: son las
+ * que tienen precio cargado y las únicas cuyo "Cancha N" se puede escribir en
+ * Airtable con la garantía de que la opción existe (SDD §3, convención de
+ * nombres). Una sede sin canchas configuradas no puede recibir altas, y la UI
+ * lo dice en vez de ofrecer un select vacío.
+ */
+export async function sedesParaAlta(): Promise<SedeParaAlta[]> {
+  const agentes = await agentesDelCliente();
+  if (agentes.length === 0) return [];
+
+  const canchas = await prisma.cancha.findMany({
+    where: { agenteId: { in: agentes.map((a) => a.id) } },
+    select: { agenteId: true, numero: true },
+    orderBy: { numero: "asc" },
+  });
+
+  return agentes.map((agente) => ({
+    id: agente.id,
+    nombre: agente.nombre,
+    canchas: canchas.filter((c) => c.agenteId === agente.id).map((c) => c.numero),
+  }));
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Turno asociado a un contacto (requerimientos §9: el panel lateral de una
+ * conversación muestra "turno asociado si existe").
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Los últimos dígitos de un teléfono, sin nada que no sea número.
+ *
+ * Es lo único que se puede comparar con confianza entre las dos fuentes: por
+ * WhatsApp el teléfono llega como "5492323330438" (país + el 9 de celular de
+ * Argentina + área + número), y en Airtable lo tipea una persona, que escribe
+ * "2323 33-0438", "+54 9 2323 330438" o "15 33-0438" según el día. Comparar los
+ * últimos 8 dígitos saltea todas esas variantes de prefijo.
+ *
+ * El riesgo asumido es el inverso: dos contactos distintos cuyos últimos 8
+ * dígitos coincidan se cruzarían entre sí. Con la cantidad de contactos de un
+ * complejo es despreciable, y por eso el panel rotula el turno como "posible
+ * coincidencia" en vez de afirmarlo como un vínculo cierto.
+ */
+function sufijoTelefono(valor: string): string | null {
+  const digitos = valor.replace(/\D/g, "");
+  return digitos.length >= 8 ? digitos.slice(-8) : null;
+}
+
+export type TurnoDeContacto = {
+  recordId: string;
+  fecha: string;
+  horaInicioMin: number | null;
+  cancha: string | null;
+  estado: Reserva["estado"];
+};
+
+/** Cuántos días para atrás y para adelante se buscan turnos del contacto. */
+const VENTANA_CONTACTO = { atras: 30, adelante: 90 };
+
+/**
+ * Turnos de un contacto en la base de turnos de su sede.
+ *
+ * Devuelve una lista vacía —no un error— si Airtable falla: es información de
+ * apoyo en un panel lateral, y romper el chat entero porque no se pudo leer un
+ * dato secundario sería peor que no mostrarlo. El fallo queda en el log.
+ */
+export async function turnosDelContacto(
+  agenteId: string,
+  telefono: string,
+): Promise<TurnoDeContacto[]> {
+  // Misma frontera de siempre (§6.3): la sede tiene que ser del cliente de la
+  // sesión, aunque el que llame ya lo haya verificado.
+  const agentes = await agentesDelCliente();
+  if (!agentes.some((a) => a.id === agenteId)) return [];
+
+  const sufijo = sufijoTelefono(telefono);
+  if (!sufijo) return [];
+
+  const hoy = hoyEnArgentina();
+  const desde = sumarDias(hoy, -VENTANA_CONTACTO.atras);
+  const hasta = sumarDias(hoy, VENTANA_CONTACTO.adelante);
+
+  let filas: Reserva[];
+  try {
+    ({ filas } = await leerReservasCacheado(agenteId, desde, hasta, TTL_TURNOS));
+  } catch (error) {
+    console.error(`[airtable] turnos del contacto, agente ${agenteId}:`, error);
+    return [];
+  }
+
+  return filas
+    .filter((r) => r.telefono !== null && sufijoTelefono(r.telefono) === sufijo)
+    .sort((a, b) => {
+      if (a.fecha !== b.fecha) return a.fecha.localeCompare(b.fecha);
+      return (a.horaInicioMin ?? 0) - (b.horaInicioMin ?? 0);
+    })
+    .map((r) => ({
+      recordId: r.recordId,
+      fecha: r.fecha,
+      horaInicioMin: r.horaInicioMin,
+      cancha: r.cancha,
+      estado: r.estado,
+    }));
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Calendario operativo (requerimientos §8).
+ *
+ * **No es el heatmap de Inicio.** Aquel responde "¿qué franjas se me llenan?"
+ * con un porcentaje agregado por día de la semana. Este responde "¿quién juega
+ * dónde y a qué hora?" con nombre y cancha de cada turno, en días concretos del
+ * calendario, para que alguien en la recepción lo lea de un vistazo. Comparten
+ * la forma de grilla horaria y nada más: distinto dato, distinta pregunta.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type VistaCalendario = "dia" | "semana";
+
+export function esVistaCalendario(valor: unknown): valor is VistaCalendario {
+  return valor === "dia" || valor === "semana";
+}
+
+/** Un turno tal como se ve en una celda del calendario. */
+export type TurnoEnCalendario = {
+  recordId: string;
+  nombre: string | null;
+  telefono: string | null;
+  cancha: string | null;
+  estado: Reserva["estado"];
+  agenteNombre: string;
+};
+
+export type DatosCalendario = {
+  vista: VistaCalendario;
+  /** Las columnas: un día en vista "dia", siete (lun-dom) en vista "semana". */
+  dias: string[];
+  /** Las filas: franjas horarias en minutos del día, ordenadas. */
+  franjas: number[];
+  /** Clave `${fecha}|${minutos}` → los turnos de esa celda. */
+  celdas: Map<string, TurnoEnCalendario[]>;
+  /**
+   * Turnos del período que no se pudieron ubicar en la grilla porque su hora de
+   * inicio vino vacía o ilegible. Se listan aparte en vez de descartarse: son
+   * turnos reales que alguien tiene que atender, y desaparecerlos de la vista
+   * operativa es peor que mostrarlos sin horario.
+   */
+  sinHorario: TurnoEnCalendario[];
+  /** Para los botones de anterior/siguiente y el rótulo del período. */
+  ancla: string;
+  anterior: string;
+  siguiente: string;
+  fallos: FalloAgente[];
+  descartes: number;
+  /** Con más de una sede en alcance conviene rotular a cuál pertenece cada turno. */
+  variasSedes: boolean;
+  /**
+   * Las canchas que se pueden elegir en el filtro.
+   *
+   * Salen de los horarios de la sede además de los turnos del período, y no
+   * sólo de los turnos como en la vista Reservas: acá se navega semana a
+   * semana, y si las opciones dependieran de lo vendido, la cancha elegida
+   * desaparecería del filtro al pasar a una semana donde todavía no vendió
+   * nada — dejando un filtro activo que no se puede sacar.
+   */
+  canchasDisponibles: string[];
+  /** La cancha por la que se está filtrando, o null. */
+  canchaActual: string | null;
+};
+
+export async function datosDeCalendario(
+  vista: VistaCalendario,
+  ancla: string,
+  agenteIdPedido?: string,
+  canchaPedida?: string,
+): Promise<DatosCalendario> {
+  const alcance = await resolverAlcance(agenteIdPedido);
+  const agentes = agentesEnAlcance(alcance);
+
+  const desde = vista === "semana" ? inicioDeSemana(ancla) : ancla;
+  const dias =
+    vista === "semana"
+      ? Array.from({ length: 7 }, (_, i) => sumarDias(desde, i))
+      : [desde];
+  const hasta = dias[dias.length - 1];
+
+  const paso = vista === "semana" ? 7 : 1;
+  const navegacion = {
+    ancla: desde,
+    anterior: sumarDias(desde, -paso),
+    siguiente: sumarDias(desde, paso),
+  };
+
+  if (agentes.length === 0) {
+    return {
+      vista,
+      dias,
+      franjas: [],
+      celdas: new Map(),
+      sinHorario: [],
+      ...navegacion,
+      fallos: [],
+      descartes: 0,
+      variasSedes: false,
+      canchasDisponibles: [],
+      canchaActual: null,
+    };
+  }
+
+  // Los slots entran para que la grilla tenga las franjas del complejo aunque
+  // no haya ninguna reserva: un día vacío tiene que verse como filas libres, no
+  // como una tabla en blanco que no dice si está libre o si falló la lectura.
+  const crudos = await traerCrudos(agentes, { desde, hasta }, TTL_TURNOS, true);
+
+  const franjas = new Set<number>();
+  const canchas = new Set<string>();
+  for (const slot of crudos.slots) {
+    if (slot.activo && slot.horaInicioMin !== null) franjas.add(slot.horaInicioMin);
+    // Las canchas del filtro salen de los horarios de la sede, que no cambian
+    // de una semana a la otra.
+    for (const cancha of slot.canchas) canchas.add(cancha);
+  }
+  for (const reserva of crudos.reservas) {
+    if (reserva.cancha) canchas.add(reserva.cancha);
+  }
+
+  const canchasDisponibles = [...canchas].sort();
+  // Sólo se acepta una cancha que exista: si llega cualquier cosa por la URL se
+  // muestra todo, en vez de una grilla vacía sin explicación.
+  const canchaActual =
+    canchaPedida && canchasDisponibles.includes(canchaPedida) ? canchaPedida : null;
+
+  const celdas = new Map<string, TurnoEnCalendario[]>();
+  const sinHorario: TurnoEnCalendario[] = [];
+
+  const nombrePorAgente = new Map(agentes.map((a) => [a.id, a.nombre]));
+
+  for (const reserva of crudos.reservas) {
+    // Un turno cancelado no ocupa la cancha: mostrarlo en la grilla operativa
+    // haría creer que esa franja está tomada cuando en realidad está libre.
+    if (reserva.estado === "CANCELADA") continue;
+    if (!dias.includes(reserva.fecha)) continue;
+    if (canchaActual && reserva.cancha !== canchaActual) continue;
+
+    const turno: TurnoEnCalendario = {
+      recordId: reserva.recordId,
+      nombre: reserva.nombre,
+      telefono: reserva.telefono,
+      cancha: reserva.cancha,
+      estado: reserva.estado,
+      agenteNombre: nombrePorAgente.get(reserva.agenteId) ?? "",
+    };
+
+    if (reserva.horaInicioMin === null) {
+      sinHorario.push(turno);
+      continue;
+    }
+
+    franjas.add(reserva.horaInicioMin);
+    const clave = `${reserva.fecha}|${reserva.horaInicioMin}`;
+    const lista = celdas.get(clave) ?? [];
+    lista.push(turno);
+    celdas.set(clave, lista);
+  }
+
+  // Dentro de una celda, ordenados por cancha: es como se lee la recepción
+  // ("Cancha 1: Pérez, Cancha 2: García").
+  for (const lista of celdas.values()) {
+    lista.sort((a, b) => (a.cancha ?? "").localeCompare(b.cancha ?? "", "es"));
+  }
+
+  return {
+    vista,
+    dias,
+    franjas: [...franjas].sort((a, b) => a - b),
+    celdas,
+    sinHorario,
+    ...navegacion,
+    fallos: crudos.fallos,
+    descartes: crudos.descartes,
+    variasSedes: agentes.length > 1,
+    canchasDisponibles,
+    canchaActual,
+  };
 }

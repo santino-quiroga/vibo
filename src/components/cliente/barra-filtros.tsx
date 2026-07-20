@@ -1,81 +1,73 @@
-import { SelectNativo } from "@/components/admin/select-nativo";
-import { Button } from "@/components/ui/button";
-import type { AgenteEnAlcance } from "@/lib/cliente/datos";
+import Link from "next/link";
+
 import { RANGOS, type ClaveRango } from "@/lib/periodos";
+import { cn } from "@/lib/utils";
 
 /**
- * El selector de alcance del punto 5 (transversal a Inicio y Turnos) más el
- * corte de período del punto 6.
+ * El corte de período del punto 6, como chips.
  *
- * Es un form GET de verdad y no un dropdown con router.push: así el filtro
- * funciona sin JS, queda en la URL (se puede compartir y volver con el botón
- * atrás) y el submit lo hace el browser. El punto 12 espera uso real desde el
- * celular, donde el JS tarda más en llegar que el HTML.
+ * Son links y no un form con select: cada rango es una URL, así que el filtro
+ * funciona sin JS, se puede compartir y el botón atrás hace lo que se espera.
+ * Además saca el paso de "elegir y después Aplicar" — un click, un cambio.
  *
- * Nota: el punto 5 lo ubica en el header, pero un layout de Next no recibe
- * searchParams, así que desde ahí no podría conservar el período al cambiar de
- * sede. Va a nivel de página, que es donde el dato existe.
+ * La sede ya no vive acá: pasó al header, que es donde el punto 5 la ubica y
+ * donde vale para todas las secciones a la vez.
  */
 export function BarraFiltros({
-  agentes,
-  sedeActual,
   rangoActual,
   accion,
-  mostrarRango = true,
+  sedeActual,
+  extras,
 }: {
-  agentes: AgenteEnAlcance[];
-  sedeActual: string | null;
   rangoActual: ClaveRango;
-  /** La ruta a la que vuelve el submit (la página actual). */
+  /** La ruta a la que apuntan los chips (la página actual). */
   accion: string;
-  mostrarRango?: boolean;
+  /** Se conserva en la URL para no perder la sede al cambiar de período. */
+  sedeActual?: string | null;
+  /**
+   * Otros filtros de la página que también hay que conservar (ej. la cancha en
+   * Turnos). Sin esto, cambiar de período resetea en silencio un filtro que el
+   * usuario no tocó, y la lista cambia por dos motivos a la vez.
+   */
+  extras?: Record<string, string | null | undefined>;
 }) {
-  // Con una sola sede el selector no decide nada: ocultarlo saca ruido de una
-  // pantalla que se mira desde el celular.
-  const hayVariasSedes = agentes.length > 1;
-
-  if (!hayVariasSedes && !mostrarRango) return null;
+  function href(rango: ClaveRango): string {
+    const params = new URLSearchParams();
+    if (sedeActual) params.set("sede", sedeActual);
+    params.set("rango", rango);
+    for (const [clave, valor] of Object.entries(extras ?? {})) {
+      if (valor) params.set(clave, valor);
+    }
+    return `${accion}?${params.toString()}`;
+  }
 
   return (
-    <form
-      method="GET"
-      action={accion}
-      className="bg-card flex flex-wrap items-end gap-3 border border-black/10 p-3"
+    <div
+      role="group"
+      aria-label="Período"
+      className="bg-card inline-flex items-center gap-1 rounded-[12px] border border-neutral-200 p-1"
     >
-      {hayVariasSedes && (
-        <div className="min-w-0 flex-1 space-y-1 sm:max-w-64">
-          <label htmlFor="sede" className="etiqueta text-xs">
-            Sede
-          </label>
-          <SelectNativo id="sede" name="sede" defaultValue={sedeActual ?? ""}>
-            <option value="">Todas las sedes</option>
-            {agentes.map((agente) => (
-              <option key={agente.id} value={agente.id}>
-                {agente.nombre}
-              </option>
-            ))}
-          </SelectNativo>
-        </div>
-      )}
+      {RANGOS.map((rango) => {
+        const activo = rango.clave === rangoActual;
 
-      {mostrarRango && (
-        <div className="min-w-0 flex-1 space-y-1 sm:max-w-48">
-          <label htmlFor="rango" className="etiqueta text-xs">
-            Período
-          </label>
-          <SelectNativo id="rango" name="rango" defaultValue={rangoActual}>
-            {RANGOS.map((rango) => (
-              <option key={rango.clave} value={rango.clave}>
-                {rango.etiqueta}
-              </option>
-            ))}
-          </SelectNativo>
-        </div>
-      )}
-
-      <Button type="submit" variant="outline">
-        Aplicar
-      </Button>
-    </form>
+        return (
+          <Link
+            key={rango.clave}
+            href={href(rango.clave)}
+            aria-current={activo ? "true" : undefined}
+            className={cn(
+              "rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium",
+              "transition-[background-color,color] duration-150 ease-out",
+              "focus-visible:ring-vibo-rojo/40 focus-visible:ring-2 focus-visible:outline-none",
+              activo
+                ? "bg-neutral-100 text-foreground"
+                : "hover:text-foreground text-neutral-500",
+            )}
+          >
+            {rango.etiqueta}
+          </Link>
+        );
+      })}
+    </div>
   );
 }

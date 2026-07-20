@@ -19,9 +19,38 @@ enum RolUsuario {
 }
 
 enum EstadoAgente {
+  // El cliente ya puede configurarlo y probarlo en el chat de prueba, pero
+  // todavía NO está conectado a WhatsApp real (SDD v2 §2). El paso a ACTIVO es
+  // una acción manual del admin, después de cargar y verificar las credenciales.
+  // Cuenta contra el límite de agentes del plan: si no, alguien podría tener
+  // varios "probándose" indefinidamente sin ocupar lugar.
+  EN_CONFIGURACION
   ACTIVO
   PAUSADO_MANUAL // lo pausó el dueño desde la plataforma
   PAUSADO_LIMITE // se pausó solo por llegar al límite de conversaciones del plan
+  // Se pausó por falta de pago (SDD v2 §4.4), tras agotarse el período de
+  // gracia. A diferencia de PAUSADO_LIMITE, el cron de ciclo NO lo levanta:
+  // esto se resuelve cobrando, no esperando al mes siguiente.
+  PAUSADO_POR_PAGO
+}
+
+// Estado de la suscripción del cliente (SDD v2 §4.2).
+enum EstadoPago {
+  SIN_SUSCRIPCION // todavía no se le generó la suscripción en Mercado Pago
+  AL_DIA
+  EN_GRACIA // falló un cobro; hay N días para resolverlo antes de cortar
+  VENCIDO // se agotó la gracia: los agentes quedan en PAUSADO_POR_PAGO
+}
+
+enum EstadoPagoRegistro {
+  APROBADO
+  RECHAZADO
+  PENDIENTE
+}
+
+enum OrigenPago {
+  MERCADOPAGO
+  MANUAL // transferencia, efectivo o cortesía, cargado a mano desde el admin
 }
 
 enum EstadoConversacion {
@@ -45,6 +74,55 @@ model Cliente {
   usuarios  Usuario[]
   agentes   Agente[]
   createdAt DateTime  @default(now())
+
+  // Facturación (SDD v2 §4). El cliente NO se autosuscribe: la suscripción la
+  // genera Vibo en Mercado Pago y le manda el link por fuera de la plataforma.
+  // Acá sólo se refleja el resultado que llega por webhook.
+  // Archivado: el cliente dejó de serlo, pero su historial se conserva.
+  //
+  // Es reversible y es el camino normal para dar de baja: borrar de verdad
+  // destruiría los pagos (contabilidad) y los mensajes de los clientes finales.
+  // Un archivado desaparece de los listados y métricas del admin, y su bot deja
+  // de responder — no se le sigue dando servicio a quien ya no es cliente.
+  archivadoAt               DateTime?
+  // Notas del equipo de Vibo sobre este cliente (SDD v2 §8).
+  //
+  // **Nunca se le muestran al cliente.** Ninguna consulta de `lib/cliente/*` la
+  // selecciona, y por eso este campo no aparece en ningún tipo que cruce al
+  // panel del dueño. Es para escribir lo que uno no le diría en la cara: "paga
+  // tarde siempre", "lo trajo Fulano", "quiere irse".
+  notasInternas             String?    @db.Text
+  mercadoPagoSubscriptionId String?
+  estadoPago                EstadoPago @default(SIN_SUSCRIPCION)
+  fechaProximoCobro         DateTime?
+  // Cuándo entró en EN_GRACIA. Es lo que el cron usa para saber si ya se
+  // agotaron los días de gracia, y para mandar el recordatorio del medio.
+  graciaDesde               DateTime?
+  // Hasta dónde se avisó por email, para no repetir el mismo aviso cada día que
+  // corre el cron (§4.5 son 3 emails puntuales, no un goteo diario).
+  ultimoAvisoPagoEn         DateTime?
+  pagos                     Pago[]
+}
+
+// Un cobro registrado (SDD v2 §4.2).
+//
+// Vibo nunca ve datos de tarjeta ni arma el checkout: esto es el resultado que
+// informa Mercado Pago por webhook, o una carga manual del admin cuando el
+// cliente pagó por transferencia, efectivo o cortesía.
+model Pago {
+  id          String             @id @default(cuid())
+  clienteId   String
+  cliente     Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  monto       Decimal            @db.Decimal(12, 2)
+  fecha       DateTime
+  estado      EstadoPagoRegistro
+  origen      OrigenPago
+  // El id del pago en Mercado Pago. Único: es lo que hace que reprocesar el
+  // mismo webhook —MP reintenta— no cree dos pagos. Null si origen = MANUAL.
+  mpPaymentId String?            @unique
+  createdAt   DateTime           @default(now())
+
+  @@index([clienteId, fecha])
 }
 
 model Usuario {
@@ -55,6 +133,10 @@ model Usuario {
   clienteId    String? // null si es VIBO_ADMIN
   cliente      Cliente?             @relation(fields: [clienteId], references: [id])
   resetTokens  PasswordResetToken[]
+  // Se actualiza en cada login exitoso (SDD v2 §6). Alimenta la señal de riesgo
+  // del §7: un cliente que hace semanas que no entra al panel es un candidato a
+  // churn, y eso se ve antes de que avise.
+  ultimoAccesoAt DateTime?
   createdAt    DateTime             @default(now())
 }
 
@@ -75,10 +157,21 @@ model PasswordResetToken {
 
 model Plan {
   id                   String    @id @default(cuid())
-  nombre               String // "Starter", "Profesional", "Multi-sede" (números reales pendientes, requerimientos punto 4.2)
+  nombre               String // "Starter", "Profesional", "Multi-sede"
   maxAgentes           Int
   maxConversacionesMes Int
   clientes             Cliente[]
+
+  // El precio mensual (SDD v2 §4.2). Deja de ser un borrador: Mercado Pago
+  // exige un monto real para crear la suscripción.
+  //
+  // Arranca en 0 porque los planes ya existen en la base y hay que poder
+  // migrar sin inventarles un precio. Un plan en 0 es "sin precio definido" y
+  // la UI del admin lo marca como pendiente — no se le cobra 0 a nadie.
+  precio            Decimal @default(0) @db.Decimal(12, 2)
+  // El id del plan de suscripción del lado de Mercado Pago, para poder cruzar
+  // lo que llega por webhook con el plan de Vibo.
+  mercadoPagoPlanId String?
 }
 
 model Agente {
@@ -87,7 +180,10 @@ model Agente {
   cliente    Cliente      @relation(fields: [clienteId], references: [id])
   nombre     String // nombre del agente/sede, ej. "Club Chinda Fútbol 5"
   deporte    String
-  estado     EstadoAgente @default(ACTIVO)
+  // Nace EN_CONFIGURACION (SDD v2 §2): que exista la fila no significa que el
+  // bot esté atendiendo. Lo pasa a ACTIVO el admin, a mano, recién después de
+  // verificar las credenciales reales contra el checklist de alta.
+  estado     EstadoAgente @default(EN_CONFIGURACION)
   promptBase String       @db.Text
 
   // Configuración de negocio que el dueño ve y edita desde la sección Agentes
@@ -124,10 +220,38 @@ model Agente {
   // los dos: el cifrado para el enmascarado del admin, el hash para la búsqueda.
   tokenIntegracionHash String? @unique
 
+  // Salud de la integración (SDD v2 §5). Se sella cuando la capa de Airtable o
+  // Evolution agota sus reintentos, para que el admin vea proactivamente qué
+  // cliente tiene un problema técnico en vez de enterarse por un reclamo.
+  //
+  // Guarda sólo el ÚLTIMO error, no un historial: la pregunta que responde es
+  // "¿esto está roto ahora?", no "¿qué pasó el mes pasado?".
+  ultimoErrorIntegracionAt  DateTime?
+  ultimoErrorIntegracionMsg String?
+
   canchas        Cancha[]
   conversaciones Conversacion[]
   usoMensual     UsoMensual[]
+  pruebasUso     PruebaAgenteUso[]
   createdAt      DateTime       @default(now())
+}
+
+// Tope diario del chat de prueba, por agente (SDD v2 §3).
+//
+// El chat de prueba llama a OpenAI con la API key GLOBAL de Vibo: el costo lo
+// absorbe Vibo, no el cliente. Sin un tope, un cliente probando en bucle es
+// gasto directo nuestro — de ahí que el contador viva en la base y no en memoria.
+//
+// No tiene nada que ver con UsoMensual: las pruebas NO consumen el plan del
+// cliente, porque no son conversaciones reales con nadie.
+model PruebaAgenteUso {
+  id            String   @id @default(cuid())
+  agenteId      String
+  agente        Agente   @relation(fields: [agenteId], references: [id], onDelete: Cascade)
+  fecha         DateTime // el día, sin hora
+  mensajesCount Int      @default(0)
+
+  @@unique([agenteId, fecha])
 }
 
 model Cancha {

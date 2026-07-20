@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "instanceId": "vibo-integracion-v2"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "url": "=https://oecd-unit-occasion-jay.trycloudflare.com/api/integracion/agentes/cmrqu6d2z0002g0unj884x1x7/contexto?telefono={{ $('Vibo - Preparar').first().json.telefono }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        64,
+        16
+      ],
+      "id": "a1b0c000-0000-4000-8000-000000000010",
+      "name": "Vibo - Contexto",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vibo — fail-open CON CACHE (SDD v2 §1).\n//\n// Por qué existe este nodo: con /contexto, el llamado a Vibo ya no trae sólo el\n// permiso, trae el prompt, las reglas y los precios. Si Vibo no responde y el\n// workflow sigue igual (fail-open de v1), el bot contesta SIN instrucciones ni\n// precios — cotiza cualquier cosa. Eso es peor que no contestar.\n//\n// Entonces: se guarda el último contexto bueno y se reusa cuando falla.\n//\n// OJO: el static data se persiste entre ejecuciones sólo en ejecuciones de\n// PRODUCCIÓN. En una ejecución manual de prueba arranca vacío, así que la\n// primera prueba manual va a decir sinContexto=true. No es un bug.\n// Prompt mínimo para cuando no hay contexto ni cache (Vibo caído en la primera\n// ejecución). Antes esto no hacía falta porque la identidad estaba hardcodeada\n// en el nodo del agente; al pasar a que la mande Vibo, sin este fallback el bot\n// se quedaría sin ninguna instruccion.\n//\n// Lo importante de este texto no es la identidad: es la prohibicion de inventar\n// precios. Un bot sin datos que igual cotiza es peor que uno que dice \"ahora te\n// confirmo\".\nconst PROMPT_FALLBACK = [\n  '## IDENTIDAD',\n  'Sos el asistente de un complejo deportivo. Atendes consultas de jugadores por WhatsApp.',\n  '',\n  '## PERSONA',\n  '- Idioma: Espanol rioplatense. Tono natural y cercano. Respuestas cortas.',\n  '',\n  '## IMPORTANTE',\n  '- En este momento NO tenes a mano los precios ni las politicas del complejo.',\n  '- Si preguntan por precios, sena o cancelaciones, NO los inventes: deci que en',\n  '  un momento alguien del equipo se los confirma.',\n].join('\\n');\n\nconst store = $getWorkflowStaticData('global');\nconst entrada = $input.first().json || {};\n\n// El contexto sirve si trae promptBase. Un 500, un body vacío o lo que deja\n// pasar el \"Continue On Fail\" no lo traen.\nconst vivo = typeof entrada.promptBase === 'string' && entrada.promptBase.length > 0;\n\nlet ctx = null;\nlet desdeCache = false;\n\nif (vivo) {\n  ctx = entrada;\n  store.viboContexto = entrada;\n  store.viboContextoAt = new Date().toISOString();\n} else if (store.viboContexto) {\n  ctx = store.viboContexto;\n  desdeCache = true;\n}\n\nconst money = (n) =>\n  typeof n === 'number' ? '$' + n.toLocaleString('es-AR', { maximumFractionDigits: 0 }) : null;\n\nfunction armarBloque(c) {\n  const partes = [];\n  const neg = c.negocio || {};\n\n  const datos = [];\n  if (neg.nombre) datos.push('- Nombre: ' + neg.nombre);\n  if (neg.deporte) datos.push('- Deporte: ' + neg.deporte);\n  if (neg.direccion) datos.push('- Direccion: ' + neg.direccion);\n  if (neg.telefono) datos.push('- Telefono: ' + neg.telefono);\n  if (datos.length) partes.push('## NEGOCIO\\n' + datos.join('\\n'));\n\n  if (c.tono) partes.push('## TONO\\n- ' + c.tono);\n\n  if (Array.isArray(c.canchas) && c.canchas.length) {\n    const filas = c.canchas.map((x) => {\n      const precio = money(x.precio) || 'sin precio cargado';\n      return '- Cancha ' + x.numero + ': ' + precio +\n        ' - turnos de ' + x.duracionTurnoMin + ' min' +\n        ' - de ' + x.horarioApertura + ' a ' + x.horarioCierre;\n    });\n    partes.push('## CANCHAS Y PRECIOS\\n' + filas.join('\\n'));\n  }\n\n  const r = c.reglas || {};\n  const reglas = [];\n  if (typeof r.anticipacionMinimaMin === 'number') {\n    const h = r.anticipacionMinimaMin / 60;\n    reglas.push('- Anticipacion minima para reservar: ' +\n      (Number.isInteger(h) ? h + ' hora(s)' : r.anticipacionMinimaMin + ' minutos'));\n  }\n  if (r.politicaCancelacion) reglas.push('- Cancelacion: ' + r.politicaCancelacion);\n\n  // OJO: \"requiere\" NO es un monto, y `false` NO significa \"no se cobra sena\":\n  // significa que NADIE CARGO la politica. Traducir eso a \"no se pide sena\" es\n  // convertir un campo vacio en una afirmacion sobre plata al cliente.\n  //\n  // Regla de este bloque: solo se afirma lo que esta escrito. Si el complejo\n  // realmente no cobra sena, hay que escribirlo en Vibo; asi el bot lo dice\n  // porque alguien lo decidio, no porque un campo quedo en blanco.\n  if (r.senia && r.senia.requiere && r.senia.detalle) {\n    reglas.push('- Sena: ' + r.senia.detalle);\n  }\n  if (reglas.length) partes.push('## REGLAS DE RESERVA\\n' + reglas.join('\\n'));\n\n  if (c.faq) partes.push('## PREGUNTAS FRECUENTES\\n' + c.faq);\n\n  return partes.join('\\n\\n');\n}\n\nif (!ctx) {\n  // Ni contexto vivo ni cache (primera ejecucion con Vibo caido). Se responde\n  // igual —fail-open— pero sin bloque: el prompt fijo del nodo sigue sirviendo.\n  return [{ json: { puedeResponder: true, desdeCache: false, sinContexto: true,\n    promptBase: PROMPT_FALLBACK, bloqueVibo: '' } }];\n}\n\n// Fail-open: si el llamado fallo, se responde aunque el cache dijera lo\n// contrario. El SDD 4.4 es explicito: es preferible una conversacion de mas que\n// cortarle la venta al cliente por una falla de infraestructura nuestra.\nconst puedeResponder = vivo ? ctx.puedeResponder !== false : true;\n\nreturn [{\n  json: {\n    puedeResponder,\n    motivo: vivo ? (ctx.motivo === undefined ? null : ctx.motivo) : null,\n    desdeCache,\n    sinContexto: false,\n    cacheAt: store.viboContextoAt || null,\n    // La identidad y la persona ahora las manda Vibo, no el nodo del agente.\n    promptBase: ctx.promptBase || PROMPT_FALLBACK,\n    bloqueVibo: armarBloque(ctx),\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        16
+      ],
+      "id": "a1b0c000-0000-4000-8000-000000000011",
+      "name": "Vibo - Contexto cache"
+    }
+  ],
+  "connections": {
+    "Vibo - Contexto": {
+      "main": [
+        [
+          {
+            "node": "Vibo - Contexto cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

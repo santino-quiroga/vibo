@@ -1,9 +1,9 @@
 /**
  * Seed de datos de desarrollo.
  *
- * Solo carga los tres planes en borrador. Los números son placeholders a
- * propósito: el punto 4.2 del documento de requerimientos deja los límites
- * reales sin definir hasta que se fijen precios, y el sprint 6 los ajusta.
+ * Carga los tres planes. Los precios **ya no son borrador** (SDD v2 §4.2):
+ * Mercado Pago exige un monto real para crear la suscripción, así que se
+ * cerraron al implementar la facturación.
  *
  * Uso: npm run db:seed
  */
@@ -13,10 +13,11 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 import { PrismaClient } from "../src/generated/prisma/client";
 
-const PLANES_BORRADOR = [
-  { nombre: "Starter", maxAgentes: 1, maxConversacionesMes: 200 },
-  { nombre: "Profesional", maxAgentes: 3, maxConversacionesMes: 500 },
-  { nombre: "Multi-sede", maxAgentes: 10, maxConversacionesMes: 2000 },
+/** Precios mensuales en pesos, definidos por el usuario el 2026-07-19. */
+const PLANES = [
+  { nombre: "Starter", maxAgentes: 1, maxConversacionesMes: 200, precio: 150000 },
+  { nombre: "Profesional", maxAgentes: 3, maxConversacionesMes: 500, precio: 350000 },
+  { nombre: "Multi-sede", maxAgentes: 10, maxConversacionesMes: 2000, precio: 750000 },
 ];
 
 async function main() {
@@ -24,7 +25,7 @@ async function main() {
     adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
   });
 
-  for (const plan of PLANES_BORRADOR) {
+  for (const plan of PLANES) {
     // Plan.nombre no es unique en el schema (el SDD no lo define así), por eso
     // se busca antes de crear en vez de usar upsert.
     const existente = await prisma.plan.findFirst({

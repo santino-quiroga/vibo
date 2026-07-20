@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Agente" ALTER COLUMN "estado" SET DEFAULT 'EN_CONFIGURACION';
+

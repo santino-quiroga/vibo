@@ -9,7 +9,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { hoyEnArgentina, rangoCompleto, resolverPeriodo } from "@/lib/periodos";
+import {
+  esFechaCalendario,
+  hoyEnArgentina,
+  inicioDeSemana,
+  rangoCompleto,
+  resolverPeriodo,
+} from "@/lib/periodos";
 
 describe("hoyEnArgentina", () => {
   it("a las 23hs argentinas todavía es el mismo día, no el siguiente", () => {
@@ -64,6 +70,41 @@ describe("resolverPeriodo", () => {
     const { actual, anterior } = resolverPeriodo("semana", "2026-03-03");
     assert.deepEqual(actual, { desde: "2026-02-25", hasta: "2026-03-03" });
     assert.deepEqual(anterior, { desde: "2026-02-18", hasta: "2026-02-24" });
+  });
+});
+
+describe("inicioDeSemana", () => {
+  // La semana del calendario operativo va de lunes a domingo. El caso que más
+  // se rompe es el domingo: con una semana que arranca el lunes, el domingo
+  // pertenece a la semana que YA pasó, no a la que empieza al día siguiente.
+  it("un domingo pertenece a la semana que arrancó el lunes anterior", () => {
+    // 2026-07-19 es domingo.
+    assert.equal(inicioDeSemana("2026-07-19"), "2026-07-13");
+  });
+
+  it("un lunes es su propio inicio de semana", () => {
+    assert.equal(inicioDeSemana("2026-07-13"), "2026-07-13");
+  });
+
+  it("un miércoles retrocede al lunes de esa semana", () => {
+    assert.equal(inicioDeSemana("2026-07-15"), "2026-07-13");
+  });
+
+  it("cruza el cambio de mes y de año sin correrse", () => {
+    // 2026-01-01 es jueves: su lunes cae en diciembre del año anterior.
+    assert.equal(inicioDeSemana("2026-01-01"), "2025-12-29");
+    // 2026-03-01 es domingo: su lunes cae en febrero.
+    assert.equal(inicioDeSemana("2026-03-01"), "2026-02-23");
+  });
+});
+
+describe("esFechaCalendario", () => {
+  it("acepta una fecha bien formada y rechaza basura de la URL", () => {
+    assert.equal(esFechaCalendario("2026-07-19"), true);
+    assert.equal(esFechaCalendario("19-07-2026"), false);
+    assert.equal(esFechaCalendario("2026-7-9"), false);
+    assert.equal(esFechaCalendario(""), false);
+    assert.equal(esFechaCalendario(undefined), false);
   });
 });
 

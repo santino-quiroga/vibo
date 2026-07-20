@@ -15,8 +15,13 @@ import { prisma } from "@/lib/prisma";
  *  - Se subió el plan a mitad de mes → el tope creció → si el pozo quedó por
  *    debajo, se reactiva sin esperar al mes siguiente.
  *
- * No toca las sedes en PAUSADO_MANUAL: el enum es de un solo valor, así que una
- * pausada a mano no está en PAUSADO_LIMITE y no entra en esta consulta.
+ * No toca las sedes en PAUSADO_MANUAL ni en PAUSADO_POR_PAGO: el enum es de un
+ * solo valor, así que una pausada por esos motivos no está en PAUSADO_LIMITE y
+ * no entra en esta consulta.
+ *
+ * Lo de PAUSADO_POR_PAGO es importante y no un detalle: si el cambio de ciclo
+ * reactivara a un cliente que no pagó, el corte por falta de pago se levantaría
+ * solo el día 1 de cada mes. Eso se resuelve cobrando, no esperando.
  *
  * Es idempotente: correrlo dos veces el mismo día no cambia nada la segunda vez.
  */

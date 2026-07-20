@@ -115,11 +115,12 @@ export const config = {
   // extensión también excluiría /api/admin/usuarios/juan@mail.com, que termina
   // en ".com" y es una ruta legítima que hay que proteger.
   matcher: [
-    // Todas las APIs salvo tres, que no las llama un usuario logueado: las de
+    // Todas las APIs salvo cuatro, que no las llama un usuario logueado: las de
     // NextAuth (tienen que ser alcanzables sin sesión para poder loguearse), las
-    // de integración de n8n (se autentican con el token por agente del SDD 6.2)
-    // y el cron de Vercel (se autentica con CRON_SECRET, SDD 9.5).
-    "/api/((?!auth|integracion|cron).*)",
+    // de integración de n8n (se autentican con el token por agente del SDD 6.2),
+    // el cron de Vercel (se autentica con CRON_SECRET, SDD 9.5) y los webhooks
+    // de Mercado Pago (se autentican validando la firma, SDD v2 §4.3).
+    "/api/((?!auth|integracion|cron|webhooks).*)",
     // Las páginas: acá sí se excluyen los assets de Next y los archivos
     // estáticos de /public, donde la extensión es una heurística válida.
     "/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.[\\w]+$).*)",

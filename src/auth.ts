@@ -39,6 +39,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const passwordOk = await verificarPassword(password, usuario.passwordHash);
         if (!passwordOk) return null;
 
+        // Último acceso (SDD v2 §6), para la señal de riesgo del §7: cuánto
+        // hace que el cliente no entra al panel.
+        //
+        // Sin await y sin romper el login si falla: es un dato de seguimiento
+        // comercial, no puede impedirle entrar a alguien con la contraseña
+        // correcta porque una escritura de métrica se demoró.
+        void prisma.usuario
+          .update({
+            where: { id: usuario.id },
+            data: { ultimoAccesoAt: new Date() },
+          })
+          .catch((error: unknown) => {
+            console.error("[auth] no se pudo sellar el último acceso:", error);
+          });
+
         return {
           id: usuario.id,
           email: usuario.email,

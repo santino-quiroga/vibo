@@ -33,11 +33,11 @@ export default async function CuentaPage() {
       </header>
 
       <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
-        <h1 className="font-serif text-3xl font-bold tracking-tight">Cuenta</h1>
+        <h1 className="t-pagina">Cuenta</h1>
         <p className="mt-1 text-sm text-neutral-500">{usuario.email}</p>
 
         <div className="mt-6">
-          <Card>
+          <Card id="cambiar-password">
             <CardHeader>
               <CardTitle className="text-base">Cambiar contraseña</CardTitle>
               <CardDescription>

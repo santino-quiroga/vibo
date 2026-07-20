@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { responderPrueba, type MensajePrueba } from "@/lib/agentes/prueba";
 import { parsearCanchasDeForm, reemplazarCanchas } from "@/lib/canchas";
 import { requerirClienteOwner } from "@/lib/dal";
 import { prisma } from "@/lib/prisma";
@@ -68,7 +69,12 @@ export async function editarConfigAgenteAction(
       direccion: d.direccion || null,
       telefonoContacto: d.telefonoContacto || null,
       tono: d.tono || null,
-      anticipacionMinHoras: d.anticipacionMinHoras ? Number(d.anticipacionMinHoras) : null,
+      // Un 0 se guarda como null: "reservar con 0 horas de anticipación" no es
+      // una regla, y si se guardara como número el bot se la diría al cliente
+      // como si lo fuera.
+      anticipacionMinHoras: Number(d.anticipacionMinHoras) > 0
+        ? Number(d.anticipacionMinHoras)
+        : null,
       politicaCancelacion: d.politicaCancelacion || null,
       senia: d.senia || null,
       faq: d.faq || null,
@@ -78,6 +84,78 @@ export async function editarConfigAgenteAction(
   revalidatePath(`/dashboard/agentes/${d.agenteId}`);
   revalidatePath("/dashboard/agentes");
   return { ok: true };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Chat de prueba (SDD v2 §3).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type EstadoPrueba = {
+  error?: string;
+  respuesta?: string;
+  restantes?: number;
+};
+
+const mensajePruebaSchema = z.object({
+  agenteId: z.string().min(1),
+  texto: z.string().trim().min(1, "Escribí un mensaje").max(1000, "Mensaje demasiado largo"),
+  /** El historial lo manda el cliente: la charla es efímera y no se persiste. */
+  historial: z.string().optional(),
+});
+
+const historialSchema = z.array(
+  z.object({
+    rol: z.enum(["user", "assistant"]),
+    contenido: z.string().max(4000),
+  }),
+);
+
+/**
+ * Responde un mensaje del chat de prueba.
+ *
+ * El historial viaja desde el navegador porque la conversación **no se
+ * persiste** (§3). Eso significa que es input del usuario y no una fuente
+ * confiable: se valida con zod y se recorta. Lo peor que puede hacer alguien
+ * manipulándolo es alterar su propia simulación, que no toca ningún dato real.
+ *
+ * Lo que NO se confía nunca es el `agenteId`: se verifica contra el cliente de
+ * la sesión, como toda acción de esta sección (§6.3). Sin eso, alguien podría
+ * leer el `promptBase` de otro cliente a través de la respuesta (v2 §9).
+ */
+export async function responderPruebaAction(
+  _previo: EstadoPrueba,
+  formData: FormData,
+): Promise<EstadoPrueba> {
+  const parsed = mensajePruebaSchema.safeParse({
+    agenteId: formData.get("agenteId"),
+    texto: formData.get("texto"),
+    historial: formData.get("historial") ?? undefined,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const agente = await agenteDelCliente(parsed.data.agenteId);
+  if (!agente) return { error: "Agente inexistente" };
+
+  let historial: MensajePrueba[] = [];
+  if (parsed.data.historial) {
+    try {
+      const crudo = historialSchema.safeParse(JSON.parse(parsed.data.historial));
+      if (crudo.success) historial = crudo.data;
+    } catch {
+      // Historial ilegible: se sigue sin él. Perder el contexto de la
+      // simulación es mejor que fallar el mensaje.
+    }
+  }
+
+  const resultado = await responderPrueba(parsed.data.agenteId, [
+    ...historial,
+    { rol: "user", contenido: parsed.data.texto },
+  ]);
+
+  if (!resultado.ok) {
+    return { error: resultado.error, restantes: resultado.restantes };
+  }
+  return { respuesta: resultado.respuesta, restantes: resultado.restantes };
 }
 
 /** Guarda las canchas del agente, scoped al cliente. Misma validación que el admin. */
@@ -122,6 +200,23 @@ export async function alternarPausaAction(
     return {
       error:
         "Este agente está pausado por el límite del plan. Se reactiva solo al empezar el próximo ciclo, o contactando a Vibo para subir de plan.",
+    };
+  }
+
+  if (agente.estado === "PAUSADO_POR_PAGO") {
+    return {
+      error:
+        "Este agente está pausado por falta de pago. Se reactiva al regularizar la suscripción — escribinos si ya pagaste.",
+    };
+  }
+
+  // El botón ya viene deshabilitado en este estado, pero la acción lo rechaza
+  // igual: un cliente que arme el POST a mano no puede darse de alta el bot solo.
+  // Activarlo es del admin, después de verificar las credenciales (SDD v2 §2).
+  if (agente.estado === "EN_CONFIGURACION") {
+    return {
+      error:
+        "Este agente todavía se está configurando. El equipo de Vibo lo activa cuando termina de conectarlo a WhatsApp.",
     };
   }
 

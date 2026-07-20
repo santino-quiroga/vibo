@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { EstadoTurno } from "@/components/cliente/estado-turno";
 import { BotonEnlace } from "@/components/ui/boton-enlace";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatearFechaCorta, formatearHora } from "@/lib/airtable/tipos";
 import { obtenerHilo, marcarLeida } from "@/lib/cliente/conversaciones";
+import { turnosDelContacto } from "@/lib/cliente/datos";
 import { horaCompleta } from "@/lib/cliente/formato";
 import { requerirClienteOwner } from "@/lib/dal";
 import { cn } from "@/lib/utils";
@@ -33,6 +36,8 @@ export default async function HiloPage({
   // Se marca leída al abrir. Es idempotente; el contador de la navegación se
   // actualiza en la próxima navegación, no hace falta que sea al instante.
   await marcarLeida(id);
+
+  const turnos = await turnosDelContacto(hilo.agenteId, hilo.contactoTelefono);
 
   return (
     <div className="space-y-4">
@@ -103,9 +108,8 @@ export default async function HiloPage({
           </Card>
         </div>
 
-        {/* Panel lateral de contacto (requerimientos punto 9). El turno asociado
-            queda para más adelante: cruzar por teléfono contra Airtable tiene su
-            propia complejidad de formatos y no bloquea el resto de la sección. */}
+        {/* Panel lateral de contacto (requerimientos punto 9): datos, y el
+            turno asociado si existe. */}
         <aside className="space-y-4">
           <Card>
             <CardHeader>
@@ -124,6 +128,49 @@ export default async function HiloPage({
                 <span className="etiqueta block text-xs text-neutral-500">Sede</span>
                 {hilo.agenteNombre}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Turnos de este contacto</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm">
+              {turnos.length === 0 ? (
+                <p className="text-neutral-500">
+                  No hay turnos a nombre de este teléfono en los últimos 30 días
+                  ni en los próximos 90.
+                </p>
+              ) : (
+                <>
+                  <ul className="divide-y divide-neutral-200">
+                    {turnos.map((turno) => (
+                      <li key={turno.recordId} className="flex items-start justify-between gap-2 py-2 first:pt-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="font-medium">
+                            {formatearFechaCorta(turno.fecha)}
+                            {turno.horaInicioMin !== null && (
+                              <span className="ml-1.5 font-mono text-neutral-500">
+                                {formatearHora(turno.horaInicioMin)}
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-neutral-500">
+                            {turno.cancha ?? "Sin cancha"}
+                          </p>
+                        </div>
+                        <EstadoTurno estado={turno.estado} className="text-[10px]" />
+                      </li>
+                    ))}
+                  </ul>
+                  {/* El cruce es por los últimos dígitos del teléfono, no por un
+                      id compartido: conviene que quien lo lee sepa que es una
+                      coincidencia y no un vínculo garantizado. */}
+                  <p className="mt-3 text-xs text-neutral-400">
+                    Coincidencia por teléfono con tu base de turnos.
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
         </aside>

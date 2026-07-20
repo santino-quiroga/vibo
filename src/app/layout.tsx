@@ -1,27 +1,21 @@
 import type { Metadata } from "next";
-import { Archivo, Fraunces, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 
-// Fuentes del manual de identidad. Se cargan con next/font y no desde
-// fonts.googleapis.com: next/font las descarga en el build y las sirve desde
-// nuestro dominio, así el CSP puede seguir bloqueando hosts externos.
+// Se cargan con next/font y no desde fonts.googleapis.com: next/font las
+// descarga en el build y las sirve desde nuestro dominio, así el CSP puede
+// seguir bloqueando hosts externos.
 
-// Display: títulos, números de KPI. Es la voz de la marca.
-const fraunces = Fraunces({
-  variable: "--font-display",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-// Texto, UI, etiquetas. "Acompaña sin competir con Fraunces".
-const archivo = Archivo({
+// Inter es la única tipografía de la interfaz: títulos, texto, etiquetas y
+// números de métrica. Sin serif en ningún lado.
+const inter = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
   display: "swap",
 });
 
-// El manual no define monoespaciada, pero los ids, tokens y credenciales del
-// admin necesitan una: se lee mucho mejor y evita confundir 0 con O.
+// Monoespaciada, sólo para cadenas de máquina del admin (ids, tokens, base
+// ids). No se usa en el panel cliente: ahí todo es Inter.
 const geistMono = Geist_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
@@ -41,7 +35,7 @@ export default function RootLayout({
   return (
     <html
       lang="es"
-      className={`${fraunces.variable} ${archivo.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="bg-background text-foreground flex min-h-full flex-col">
         {children}
