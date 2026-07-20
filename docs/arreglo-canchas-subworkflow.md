@@ -159,51 +159,44 @@ nodo Code).
 Hoy la cantidad de canchas está en dos constantes: `FALLBACK` en `Asignar cancha`
 y `TOTAL_CANCHAS` en `get_availability`. Funciona, pero hay que acordarse de
 tocarlas al clonar para otro complejo, y si en Vibo se agrega una cancha, n8n no
-se entera. Esta mejora hace que salga de Vibo (que ya sabe cuántas canchas tiene
-cada agente), así no se toca nunca más. Son 4 ediciones en n8n; ninguna en Vibo.
+se entera. Esta mejora hace que salga de Vibo, que ya las conoce por agente.
 
-**5a. Nodo `Vibo - Contexto cache` (parent) — exponer la lista.** En el `return`
-final (el del camino OK, no el del `if (!ctx)`), agregar dos campos:
-
-```javascript
-    canchasValidas: (Array.isArray(ctx.canchas) ? ctx.canchas.map((x) => 'Cancha ' + x.numero).join(',') : ''),
-    totalCanchas: (Array.isArray(ctx.canchas) ? ctx.canchas.length : 0),
-```
-
-(El `ctx` ya lo tiene: es la respuesta de `/contexto`. En el fallback sin ctx
-quedan vacío/0, y los subworkflows caen a su default — fail-open correcto.)
-
-**5b. Tool `create_booking_safe` (parent) — pasar la lista.**
+**No se toca el nodo de cache.** La lista se arma directo desde el nodo
+`Vibo - Contexto` (la respuesta cruda de `/contexto`, que ya trae el array
+`canchas`) en la misma expresión del mapeo. Menos lugares donde romperse.
 
 > **OJO — los inputs de un tool NO se agregan en el tool, los declara el
 > subworkflow.** El nodo del padre sólo muestra los campos que el
 > `When Executed by Another Workflow` del subworkflow tiene declarados. Si el
-> input nuevo no aparece para mapear, es porque falta declararlo del otro lado.
+> input nuevo no aparece para mapear, hay que agregarlo primero en el trigger del
+> subworkflow.
 
-- **Primero**, en el subworkflow `Subworkflow_create_booking_PadelAI`, abrí el
-  trigger `When Executed by Another Workflow` y **agregá un input** `CanchasValidas`
-  a la lista (que hoy tiene Nombre, Fecha, Hora_inicio, Cancha, Telefono). Guardá.
-- **Después**, en el parent, en el tool `create_booking_safe` ya aparece el campo
-  `CanchasValidas`. Mapealo a una **expresión fija** (NO `$fromAI` — esto no lo
-  decide el modelo):
+**5a. Tool `create_booking_safe` (parent) — pasar la lista.**
 
-```
-={{ $('Vibo - Contexto cache').first().json.canchasValidas }}
-```
-
-El nodo `Asignar cancha` ya lee `req.CanchasValidas`, así que no hay que tocarlo.
-
-**5c. Tool `get_availability` (parent) — pasar el total.** Mismo procedimiento:
-
-- **Primero**, en el subworkflow de `get_availability`, en su trigger
-  `When Executed by Another Workflow`, agregá el input `TotalCanchas` (hoy tiene
-  fecha, dia_semana). Guardá.
-- **Después**, en el parent, en el tool `get_availability`, mapeá `TotalCanchas` a
-  la expresión fija:
+- En el subworkflow `Subworkflow_create_booking_PadelAI`, en el trigger
+  `When Executed by Another Workflow`, **agregá el input** `CanchasValidas` (la
+  lista hoy tiene Nombre, Fecha, Hora_inicio, Cancha, Telefono). Guardá.
+- En el parent, tool `create_booking_safe`, mapeá `CanchasValidas` (expresión
+  fija, NO `$fromAI`):
 
 ```
-={{ $('Vibo - Contexto cache').first().json.totalCanchas }}
+={{ ($('Vibo - Contexto').first().json.canchas || []).map(c => 'Cancha ' + c.numero).join(',') }}
 ```
+
+El nodo `Asignar cancha` ya lee `req.CanchasValidas`, no se toca.
+
+**5b. Tool `get_availability` (parent) — pasar el total.**
+
+- En el subworkflow de `get_availability`, en su trigger, agregá el input
+  `TotalCanchas` (hoy tiene fecha, dia_semana). Guardá.
+- En el parent, tool `get_availability`, mapeá `TotalCanchas`:
+
+```
+={{ ($('Vibo - Contexto').first().json.canchas || []).length }}
+```
+
+En ambos, `|| []` mantiene el fail-open: si Vibo no responde, queda vacío/0 y los
+subworkflows caen a su constante de respaldo en vez de cortar.
 
 **5d. Nodo `merge_slots` (subworkflow get_availability).** Cambiar la constante
 por la lectura del input, con la constante de respaldo por si llega 0/vacío
