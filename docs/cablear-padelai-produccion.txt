@@ -1,0 +1,237 @@
+# Cablear Padel AI (producción) — copia "PadelAI - Vibo Test"
+
+agenteId de producción : cmrtgpaq8000004kwub4xcu09
+URL de Vibo            : https://vibo-drab.vercel.app
+Workflow              : PadelAI - Vibo Test (eK0pW6fBjNpgOdNN), INACTIVO
+
+Los 5 nodos de Vibo ya están en la copia y bien conectados. NO hay que pegar
+nodos nuevos ni rehacer conexiones: sólo cambiar valores dentro de 4 nodos.
+Pegar nodos crearía ids nuevos y habría que recablear 4 conexiones a mano.
+
+
+## PASO 0 — Credencial (hacelo primero)
+
+n8n > Credentials > crear "Header Auth":
+  Name : Authorization
+  Value: Bearer <TOKEN-DEL-AGENTE-DE-PRODUCCION>
+
+El token se mostró UNA SOLA VEZ al crear el agente. Si se perdió, se regenera
+desde /admin/agentes/cmrtgpaq8000004kwub4xcu09 (el anterior deja de servir al instante).
+
+Asignar esa credencial a los 3 nodos HTTP de Vibo (Log contacto, Contexto,
+Log IA). Va como credencial y NO como header suelto: así vive en un solo lugar
+y no se copia a cada duplicado del workflow.
+
+
+## PASO 1 — Vibo - Log contacto
+
+Campo URL (reemplazar todo):
+https://vibo-drab.vercel.app/api/integracion/mensajes
+
+Campo JSON / Body — cambiar SOLO el valor de agenteId por:
+cmrtgpaq8000004kwub4xcu09
+
+
+## PASO 2 — Vibo - Contexto
+
+Campo URL (reemplazar todo, incluido el = inicial):
+=https://vibo-drab.vercel.app/api/integracion/agentes/cmrtgpaq8000004kwub4xcu09/contexto?telefono={{ $('Vibo - Preparar').first().json.telefono }}
+
+
+## PASO 3 — Vibo - Log IA
+
+Campo URL (reemplazar todo):
+https://vibo-drab.vercel.app/api/integracion/mensajes
+
+Campo JSON / Body — cambiar SOLO el valor de agenteId por:
+cmrtgpaq8000004kwub4xcu09
+
+OJO: NO reemplaces el body entero por el del repo. La copia usa .first() y el
+archivo del repo todavía tiene .item, que es un bug conocido: con .item el nodo
+de transcripción corta el rastreo de ítems y el nodo falla.
+
+
+## PASO 4 — Vibo - Contexto cache (nodo Code)
+
+Reemplazar TODO el contenido del editor de código por el bloque de más abajo.
+
+Qué arregla: la versión que está hoy en n8n traduce senia.requiere === false a
+"no se pide sena". Pero false significa "NADIE CARGO la politica", no "no se
+cobra". El agente de producción tiene senia vacío, así que tal como está el bot
+le diría a clientes reales que no se pide seña — una afirmación sobre plata que
+nadie decidió. La versión de abajo sólo afirma lo que está escrito.
+
+
+## PASO 5 — Probar SIN tocar producción
+
+El webhook de Evolution apunta al workflow EN VIVO. Si lo repuntás al modo test,
+el bot real deja de atender (en modo test n8n captura UNA ejecución y para).
+En vez de eso:
+
+  1. Poner la copia en "Execute workflow"
+  2. Postear un payload con forma real de Evolution a:
+     https://n8n.srv1546556.hstgr.cloud/webhook-test/323a12e5-e128-4284-9a0f-19e17fdabab0
+
+NO uses 5492323330438 como número de prueba: es el número del propio bot y el
+nodo Code corta con return [], dejando la ejecución en VERDE sin hacer nada.
+
+
+## PASO 6 — Verificar (del lado de Vibo, no de n8n)
+
+Que la ejecución dé verde NO prueba nada: los 3 nodos van con
+onError: continueRegularOutput (fail-open del SDD 4.4), así que un 401 por token
+mal cargado se ve idéntico al camino feliz.
+
+Verificar:
+  [ ] En Vibo Conversaciones aparece la conversación con el mensaje
+  [ ] El contador del plan subió (Cuenta > Plan)
+  [ ] En la salida de "Vibo - Contexto cache": desdeCache=false y sinContexto=false
+  [ ] bloqueVibo trae los precios reales ($48.000)
+  [ ] bloqueVibo NO dice nada sobre seña (senia está vacío en Vibo)
+
+En la PRIMERA ejecución manual el cache arranca vacío y dice sinContexto: true.
+No es un bug: el static data sólo persiste entre ejecuciones de producción.
+
+
+## ANTES de aplicar esto al workflow EN VIVO (bWHVTVBa7NWEh8K9)
+
+  [ ] Rotar la API key de Evolution: está hardcodeada en texto plano en el nodo
+      HTTP Request y ya se expuso dos veces. Pasarla a credencial de n8n.
+  [ ] Poner Evolution detrás de TLS (hoy es http://187.127.6.174:8080 sin cifrar)
+  [ ] Recordar que al cablear, el bot deja de decir el "$12.000" de cancelación
+      y pasa a decir lo de Vibo: "se puede cancelar hasta 3 horas antes sin cargo"
+
+
+===============================================================================
+CODIGO PARA EL PASO 4 — pegar TODO esto en el nodo "Vibo - Contexto cache"
+===============================================================================
+
+// Vibo — fail-open CON CACHE (SDD v2 §1).
+//
+// Por qué existe este nodo: con /contexto, el llamado a Vibo ya no trae sólo el
+// permiso, trae el prompt, las reglas y los precios. Si Vibo no responde y el
+// workflow sigue igual (fail-open de v1), el bot contesta SIN instrucciones ni
+// precios — cotiza cualquier cosa. Eso es peor que no contestar.
+//
+// Entonces: se guarda el último contexto bueno y se reusa cuando falla.
+//
+// OJO: el static data se persiste entre ejecuciones sólo en ejecuciones de
+// PRODUCCIÓN. En una ejecución manual de prueba arranca vacío, así que la
+// primera prueba manual va a decir sinContexto=true. No es un bug.
+// Prompt mínimo para cuando no hay contexto ni cache (Vibo caído en la primera
+// ejecución). Antes esto no hacía falta porque la identidad estaba hardcodeada
+// en el nodo del agente; al pasar a que la mande Vibo, sin este fallback el bot
+// se quedaría sin ninguna instruccion.
+//
+// Lo importante de este texto no es la identidad: es la prohibicion de inventar
+// precios. Un bot sin datos que igual cotiza es peor que uno que dice "ahora te
+// confirmo".
+const PROMPT_FALLBACK = [
+  '## IDENTIDAD',
+  'Sos el asistente de un complejo deportivo. Atendes consultas de jugadores por WhatsApp.',
+  '',
+  '## PERSONA',
+  '- Idioma: Espanol rioplatense. Tono natural y cercano. Respuestas cortas.',
+  '',
+  '## IMPORTANTE',
+  '- En este momento NO tenes a mano los precios ni las politicas del complejo.',
+  '- Si preguntan por precios, sena o cancelaciones, NO los inventes: deci que en',
+  '  un momento alguien del equipo se los confirma.',
+].join('\n');
+
+const store = $getWorkflowStaticData('global');
+const entrada = $input.first().json || {};
+
+// El contexto sirve si trae promptBase. Un 500, un body vacío o lo que deja
+// pasar el "Continue On Fail" no lo traen.
+const vivo = typeof entrada.promptBase === 'string' && entrada.promptBase.length > 0;
+
+let ctx = null;
+let desdeCache = false;
+
+if (vivo) {
+  ctx = entrada;
+  store.viboContexto = entrada;
+  store.viboContextoAt = new Date().toISOString();
+} else if (store.viboContexto) {
+  ctx = store.viboContexto;
+  desdeCache = true;
+}
+
+const money = (n) =>
+  typeof n === 'number' ? '$' + n.toLocaleString('es-AR', { maximumFractionDigits: 0 }) : null;
+
+function armarBloque(c) {
+  const partes = [];
+  const neg = c.negocio || {};
+
+  const datos = [];
+  if (neg.nombre) datos.push('- Nombre: ' + neg.nombre);
+  if (neg.deporte) datos.push('- Deporte: ' + neg.deporte);
+  if (neg.direccion) datos.push('- Direccion: ' + neg.direccion);
+  if (neg.telefono) datos.push('- Telefono: ' + neg.telefono);
+  if (datos.length) partes.push('## NEGOCIO\n' + datos.join('\n'));
+
+  if (c.tono) partes.push('## TONO\n- ' + c.tono);
+
+  if (Array.isArray(c.canchas) && c.canchas.length) {
+    const filas = c.canchas.map((x) => {
+      const precio = money(x.precio) || 'sin precio cargado';
+      return '- Cancha ' + x.numero + ': ' + precio +
+        ' - turnos de ' + x.duracionTurnoMin + ' min' +
+        ' - de ' + x.horarioApertura + ' a ' + x.horarioCierre;
+    });
+    partes.push('## CANCHAS Y PRECIOS\n' + filas.join('\n'));
+  }
+
+  const r = c.reglas || {};
+  const reglas = [];
+  if (typeof r.anticipacionMinimaMin === 'number') {
+    const h = r.anticipacionMinimaMin / 60;
+    reglas.push('- Anticipacion minima para reservar: ' +
+      (Number.isInteger(h) ? h + ' hora(s)' : r.anticipacionMinimaMin + ' minutos'));
+  }
+  if (r.politicaCancelacion) reglas.push('- Cancelacion: ' + r.politicaCancelacion);
+
+  // OJO: "requiere" NO es un monto, y `false` NO significa "no se cobra sena":
+  // significa que NADIE CARGO la politica. Traducir eso a "no se pide sena" es
+  // convertir un campo vacio en una afirmacion sobre plata al cliente.
+  //
+  // Regla de este bloque: solo se afirma lo que esta escrito. Si el complejo
+  // realmente no cobra sena, hay que escribirlo en Vibo; asi el bot lo dice
+  // porque alguien lo decidio, no porque un campo quedo en blanco.
+  if (r.senia && r.senia.requiere && r.senia.detalle) {
+    reglas.push('- Sena: ' + r.senia.detalle);
+  }
+  if (reglas.length) partes.push('## REGLAS DE RESERVA\n' + reglas.join('\n'));
+
+  if (c.faq) partes.push('## PREGUNTAS FRECUENTES\n' + c.faq);
+
+  return partes.join('\n\n');
+}
+
+if (!ctx) {
+  // Ni contexto vivo ni cache (primera ejecucion con Vibo caido). Se responde
+  // igual —fail-open— pero sin bloque: el prompt fijo del nodo sigue sirviendo.
+  return [{ json: { puedeResponder: true, desdeCache: false, sinContexto: true,
+    promptBase: PROMPT_FALLBACK, bloqueVibo: '' } }];
+}
+
+// Fail-open: si el llamado fallo, se responde aunque el cache dijera lo
+// contrario. El SDD 4.4 es explicito: es preferible una conversacion de mas que
+// cortarle la venta al cliente por una falla de infraestructura nuestra.
+const puedeResponder = vivo ? ctx.puedeResponder !== false : true;
+
+return [{
+  json: {
+    puedeResponder,
+    motivo: vivo ? (ctx.motivo === undefined ? null : ctx.motivo) : null,
+    desdeCache,
+    sinContexto: false,
+    cacheAt: store.viboContextoAt || null,
+    // La identidad y la persona ahora las manda Vibo, no el nodo del agente.
+    promptBase: ctx.promptBase || PROMPT_FALLBACK,
+    bloqueVibo: armarBloque(ctx),
+  },
+}];
+
