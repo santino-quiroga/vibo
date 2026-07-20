@@ -374,15 +374,17 @@ Orden pensado para minimizar retrabajo — cada sprint deja algo usable, no piez
 | **5. Planes y límites** | Conteo en tiempo real de `UsoMensual`, bloqueo duro de agentes, reactivación manual desde admin, Cron de cierre/apertura de ciclo | Necesita que sprint 4 ya esté logueando mensajes, porque de ahí sale el conteo |
 | **6. Cierre** | Seguridad (cifrado revisado, HTTPS de punta a punta incluyendo el fix de Evolution API), QA general, ajuste de la tabla de planes con números reales (doc de requerimientos, punto 4.2) | Último filtro antes de dar de alta clientes reales en serio |
 
-### Cierre de MVP pendiente (detectado en revisión post-Sprint, no es v2)
+### Cierre de MVP — COMPLETO (detectado en revisión post-Sprint, no es v2)
 
-Al probar el MVP salieron dos huecos reales del alcance original, no mejoras nuevas:
+Al probar el MVP salieron huecos reales del alcance original, no mejoras nuevas. **Los tres están cerrados y verificados end-to-end:**
 
-1. **Sección Agentes sin implementar** — estaba en el alcance desde el punto 7 del doc de requerimientos (listado + detalle: info del negocio, canchas/precios, prompt, reglas, bot activo/pausado). Hay que completarla antes de considerar el MVP cerrado.
-2. **Turnos solo muestra reservas, no gestiona horarios disponibles** — ver punto 8.0 del doc de requerimientos (agregado tras esta revisión). Se suma como parte de la misma sección Turnos, mismo patrón de integración con Airtable que ya existe para Reservas.
-3. **Turnos: falta cancelar/reprogramar y falta el calendario operativo** — detectado en revisión de la implementación de v1. Cancelar/reprogramar ya estaba en el alcance original (punto 8 del doc de requerimientos) y quedó pendiente. El calendario operativo (nombre + cancha por turno, día/semana) es distinto del heatmap de ocupación de Inicio — se aclaró la diferencia en el doc de requerimientos para que no se vuelvan a confundir.
+1. ~~**Sección Agentes sin implementar**~~ — **HECHO.** Punto 7 del doc de requerimientos: listado en cards + detalle editable (negocio, personalidad/prompt, reglas de reserva, FAQ, canchas) + toggle activo/pausado. Se agregaron a `Agente` los campos `direccion`, `telefonoContacto`, `tono`, `anticipacionMinHoras`, `politicaCancelacion`, `senia` y `faq`.
+2. ~~**Turnos solo muestra reservas, no gestiona horarios disponibles**~~ — **HECHO.** Sub-vista Horarios/Slots (punto 8.0). Obligó a sumar **escritura** al cliente de Airtable (`crearRegistro`/`actualizarRegistro`, con `typecast:false`). Ojo: en la base real la tabla no se llama "Slots" sino `Configuracion`.
+3. ~~**Turnos: falta cancelar/reprogramar y falta el calendario operativo**~~ — **HECHO.** Cancelar/reprogramar (con bloqueo de doble booking) y calendario operativo día/semana en `/dashboard/turnos/calendario`, distinto del heatmap de ocupación de Inicio.
 
-Ninguno de los dos requiere nuevas decisiones de arquitectura — ambos usan la capa de integración con Airtable ya definida (sección 4.1) y el modelo de datos ya existente (`Cancha`, `Agente`). Es trabajo de UI + endpoints faltantes, no diseño nuevo.
+Ninguno requirió nuevas decisiones de arquitectura — todos usan la capa de integración con Airtable ya definida (sección 4.1) y el modelo de datos ya existente (`Cancha`, `Agente`). Fue trabajo de UI + endpoints faltantes, no diseño nuevo.
+
+**Agregado fuera de los documentos, a pedido:** **alta manual de turnos** desde el panel. No estaba en el alcance (el punto 8 sólo pedía cancelar/reprogramar, y la sección 4.1 sólo lista esas dos escrituras). Se sumó por la misma lógica que justificó el punto 8.0: sin esto, un turno que entra por teléfono o al mostrador obliga al dueño a abrir Airtable, que es justo lo que la plataforma viene a evitar. Escribe `Creada por bot = false` — si se marcara mal, infla la tasa de conversión de Inicio, que sólo cuenta turnos del bot.
 
 ### Fuera del MVP (v2, no bloqueante)
 
