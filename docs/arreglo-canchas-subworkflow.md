@@ -74,48 +74,53 @@ Sin tocar el diseño, frena el sangrado:
 
 Insertar **entre** `Search records` y el `If`. Tipo: Code (Run Once for All Items).
 
+Pegá el nodo **entero** (Ctrl+A adentro del editor, borrar, pegar). Pegar
+bloques parciales dentro del código viejo deja `const`/llaves duplicados y tira
+error de sintaxis.
+
 ```javascript
-// Asigna la cancha libre para el slot, en vez de dejar que la elija el LLM.
-//
-// Search records ya trajo TODAS las reservas de este Fecha+Hora (de cualquier
-// cancha, sin las canceladas). De ahí sale qué canchas están ocupadas.
+// Asignar cancha — elige una cancha libre para el slot, en vez de dejar
+// que la elija el LLM (que no sabe cuáles hay ni cuál está ocupada).
+// Search records ya trajo TODAS las reservas de este Fecha+Hora, sin las
+// canceladas (su fórmula usa DATETIME_FORMAT para matchear la fecha).
 
 const req = $('When Executed by Another Workflow').first().json;
 
-// Canchas ya tomadas en este slot.
+// Canchas ya tomadas en este slot. Tolera que Airtable devuelva los campos
+// planos o anidados en .fields.
 const ocupadas = $('Search records').all()
-  .map((i) => String(i.json.Cancha || '').trim())
+  .map((i) => {
+    const f = (i.json && i.json.fields) ? i.json.fields : i.json;
+    return String((f && f.Cancha) || '').trim();
+  })
   .filter(Boolean);
 
-// Lista de canchas válidas del complejo. Idealmente llega desde Vibo en el
-// input CanchasValidas ("Cancha 1,Cancha 2"); si no llegó, cae al fallback.
-// CAMBIÁ el fallback al clonar este workflow para otro complejo — o mejor,
-// cableá CanchasValidas desde Vibo (ver PASO 5) y no toques esto nunca más.
+// Canchas válidas del complejo. Idealmente llega en CanchasValidas desde Vibo;
+// si no, cae al fallback. CAMBIA el fallback al clonar para otro complejo.
 const FALLBACK = ['Cancha 1', 'Cancha 2'];
 let validas = String(req.CanchasValidas || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 if (!validas.length) validas = FALLBACK;
 
-const pedida = String(req.Cancha || '').trim();
-const pedidaEsValida = validas.includes(pedida);
-
 // La cancha pedida es una PREFERENCIA, no una orden: el LLM la manda igual
-// aunque el jugador diga "me da lo mismo" (el tool tiene Cancha como $fromAI).
-// Si está libre se respeta; si está ocupada, se cae a cualquier otra libre.
-// Sólo SLOT_OCUPADO si NO queda ninguna. (Si acá se cortara cuando la pedida
-// está ocupada, el bot rechazaría el slot con una cancha libre → "un solo
-// turno por hora", que es exactamente el bug que trajo esto.)
+// aunque el jugador diga "me da lo mismo". Se respeta si esta libre; si no,
+// se cae a cualquier otra libre. SLOT_OCUPADO solo si no queda ninguna.
+const pedida = String(req.Cancha || '').trim();
 let elegida = null;
-if (pedidaEsValida && !ocupadas.includes(pedida)) {
+if (validas.includes(pedida) && !ocupadas.includes(pedida)) {
   elegida = pedida;
 } else {
   elegida = validas.find((c) => !ocupadas.includes(c)) || null;
 }
 
+const _debug = { ocupadas, validas, pedida, elegida };
+
 if (!elegida) {
-  return [{ json: { resultado: 'SLOT_OCUPADO', cancha: null } }];
+  return [{ json: { resultado: 'SLOT_OCUPADO', cancha: null, _debug } }];
 }
-return [{ json: { resultado: 'OK', cancha: elegida } }];
+return [{ json: { resultado: 'OK', cancha: elegida, _debug } }];
 ```
 
 ---
