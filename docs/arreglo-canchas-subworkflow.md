@@ -173,9 +173,19 @@ final (el del camino OK, no el del `if (!ctx)`), agregar dos campos:
 (El `ctx` ya lo tiene: es la respuesta de `/contexto`. En el fallback sin ctx
 quedan vacío/0, y los subworkflows caen a su default — fail-open correcto.)
 
-**5b. Tool `create_booking_safe` (parent) — pasar la lista.** Agregar un input
-`CanchasValidas`, mapeado a una **expresión fija** (NO `$fromAI` — esto no lo
-decide el modelo):
+**5b. Tool `create_booking_safe` (parent) — pasar la lista.**
+
+> **OJO — los inputs de un tool NO se agregan en el tool, los declara el
+> subworkflow.** El nodo del padre sólo muestra los campos que el
+> `When Executed by Another Workflow` del subworkflow tiene declarados. Si el
+> input nuevo no aparece para mapear, es porque falta declararlo del otro lado.
+
+- **Primero**, en el subworkflow `Subworkflow_create_booking_PadelAI`, abrí el
+  trigger `When Executed by Another Workflow` y **agregá un input** `CanchasValidas`
+  a la lista (que hoy tiene Nombre, Fecha, Hora_inicio, Cancha, Telefono). Guardá.
+- **Después**, en el parent, en el tool `create_booking_safe` ya aparece el campo
+  `CanchasValidas`. Mapealo a una **expresión fija** (NO `$fromAI` — esto no lo
+  decide el modelo):
 
 ```
 ={{ $('Vibo - Contexto cache').first().json.canchasValidas }}
@@ -183,8 +193,13 @@ decide el modelo):
 
 El nodo `Asignar cancha` ya lee `req.CanchasValidas`, así que no hay que tocarlo.
 
-**5c. Tool `get_availability` (parent) — pasar el total.** Agregar un input
-`TotalCanchas`, también expresión fija:
+**5c. Tool `get_availability` (parent) — pasar el total.** Mismo procedimiento:
+
+- **Primero**, en el subworkflow de `get_availability`, en su trigger
+  `When Executed by Another Workflow`, agregá el input `TotalCanchas` (hoy tiene
+  fecha, dia_semana). Guardá.
+- **Después**, en el parent, en el tool `get_availability`, mapeá `TotalCanchas` a
+  la expresión fija:
 
 ```
 ={{ $('Vibo - Contexto cache').first().json.totalCanchas }}
