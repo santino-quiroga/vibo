@@ -99,12 +99,16 @@ if (!validas.length) validas = FALLBACK;
 const pedida = String(req.Cancha || '').trim();
 const pedidaEsValida = validas.includes(pedida);
 
+// La cancha pedida es una PREFERENCIA, no una orden: el LLM la manda igual
+// aunque el jugador diga "me da lo mismo" (el tool tiene Cancha como $fromAI).
+// Si está libre se respeta; si está ocupada, se cae a cualquier otra libre.
+// Sólo SLOT_OCUPADO si NO queda ninguna. (Si acá se cortara cuando la pedida
+// está ocupada, el bot rechazaría el slot con una cancha libre → "un solo
+// turno por hora", que es exactamente el bug que trajo esto.)
 let elegida = null;
-if (pedidaEsValida) {
-  // El jugador pidió una puntual: se respeta sólo si está libre.
-  if (!ocupadas.includes(pedida)) elegida = pedida;
+if (pedidaEsValida && !ocupadas.includes(pedida)) {
+  elegida = pedida;
 } else {
-  // Sin preferencia (o basura tipo "Cualquiera"): la primera libre.
   elegida = validas.find((c) => !ocupadas.includes(c)) || null;
 }
 
