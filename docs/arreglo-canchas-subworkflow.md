@@ -1,16 +1,29 @@
 # Arreglo del subworkflow de reservas — asignación de cancha robusta
 
-## Qué está mal hoy (3 defectos)
+## Qué está mal hoy (4 defectos)
 
-1. **El chequeo de solapamiento ignora la cancha.** `Search records` filtra por
-   `Fecha` + `Hora inicio` + no-cancelada, sin mirar `Cancha`. El `If` sólo crea
-   si esa búsqueda vuelve vacía. Resultado: **una reserva en Cancha 1 a las 20:00
-   hace que el bot rechace la Cancha 2 a las 20:00 aunque esté libre** → se pierde
-   la mitad de la capacidad.
-2. **Typecast encendido** en `Create a record` (`options.typecast = true`). Por eso
-   "Cualquiera" se guardó como opción nueva del select en vez de fallar. Contradice
-   el checklist de activación.
-3. **La cancha la elige el LLM**, que no tiene ninguna tool que le diga qué canchas
+0. **`Search records` no encontraba NINGUNA reserva** (el más grave, detectado al
+   probar). La fórmula comparaba `{Fecha} = '2026-07-21'`, pero `Fecha` es un campo
+   de tipo fecha en Airtable (guarda ISO, `2026-07-21T00:00:00.000Z`), y `=` contra
+   un string da falso casi siempre. Devolvía vacío en cada llamada → el chequeo de
+   solapamiento no veía nada → **sobreventa**: se podía reservar el mismo slot
+   infinitas veces. Se ve como "la 3ra reserva del mismo horario dio Cancha 1 en
+   vez de SLOT_OCUPADO".
+   **Fix:** en `Search records`, cambiar la primera condición del filterByFormula a
+   `DATETIME_FORMAT({Fecha}, 'YYYY-MM-DD') = '{{ $input.first().json.Fecha }}'`.
+   Fórmula completa:
+   ```
+   =AND(DATETIME_FORMAT({Fecha}, 'YYYY-MM-DD') = '{{ $input.first().json.Fecha }}', {Hora inicio} = '{{ $input.first().json.Hora_inicio }}', NOT({Estado} = 'Cancelada'))
+   ```
+1. **El chequeo de solapamiento ignoraba la cancha.** Filtraba por `Fecha` +
+   `Hora inicio` sin mirar `Cancha`, y el `If` sólo creaba si la búsqueda volvía
+   vacía. (Moot mientras el defecto 0 hacía que volviera vacía siempre, pero hay que
+   arreglar los dos.) La lógica correcta la resuelve el nodo `Asignar cancha`: mira
+   qué canchas del slot están ocupadas y asigna una libre.
+2. **Typecast encendido** dejaba entrar "Cualquiera" como opción nueva del select.
+   OJO: NO se apaga — lo necesita el campo Fecha (ver Paso 1). El freno real es el
+   nodo `Asignar cancha`, que garantiza un valor de cancha válido.
+3. **La cancha la elegía el LLM**, que no tiene ninguna tool que le diga qué canchas
    existen ni cuál está libre. De ahí "Cualquiera".
 
 ## La idea del arreglo
