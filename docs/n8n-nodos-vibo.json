@@ -18,12 +18,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://interests-problems-pamela-characterization.trycloudflare.com/api/integracion/mensajes",
+        "url": "https://vibo-drab.vercel.app/api/integracion/mensajes",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"agenteId\": \"cmrqu6d2z0002g0unj884x1x7\",\n  \"telefono\": $json.telefono,\n  \"remitente\": \"CONTACTO\",\n  \"contenido\": $json.texto,\n  \"contactoNombre\": $json.nombre,\n  \"evolutionMsgId\": $json.msgId\n} }}",
+        "jsonBody": "={{ {\n  \"agenteId\": \"REEMPLAZAR-POR-EL-AGENTE-ID-DE-PRODUCCION\",\n  \"telefono\": $json.telefono,\n  \"remitente\": \"CONTACTO\",\n  \"contenido\": $json.texto,\n  \"contactoNombre\": $json.nombre,\n  \"evolutionMsgId\": $json.msgId\n} }}",
         "options": {
           "timeout": 10000
         }
@@ -37,7 +37,7 @@
     },
     {
       "parameters": {
-        "url": "=https://interests-problems-pamela-characterization.trycloudflare.com/api/integracion/agentes/cmrqu6d2z0002g0unj884x1x7/puede-responder?telefono={{ $('Vibo - Preparar').item.json.telefono }}",
+        "url": "=https://vibo-drab.vercel.app/api/integracion/agentes/REEMPLAZAR-POR-EL-AGENTE-ID-DE-PRODUCCION/puede-responder?telefono={{ $('Vibo - Preparar').item.json.telefono }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -86,12 +86,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://interests-problems-pamela-characterization.trycloudflare.com/api/integracion/mensajes",
+        "url": "https://vibo-drab.vercel.app/api/integracion/mensajes",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"agenteId\": \"cmrqu6d2z0002g0unj884x1x7\",\n  \"telefono\": $('Vibo - Preparar').item.json.telefono,\n  \"remitente\": \"IA\",\n  \"contenido\": $('AI Agent1').item.json.output,\n  \"evolutionMsgId\": ($json.key?.id || '')\n} }}",
+        "jsonBody": "={{ {\n  \"agenteId\": \"REEMPLAZAR-POR-EL-AGENTE-ID-DE-PRODUCCION\",\n  \"telefono\": $('Vibo - Preparar').item.json.telefono,\n  \"remitente\": \"IA\",\n  \"contenido\": $('AI Agent1').item.json.output,\n  \"evolutionMsgId\": ($json.key?.id || '')\n} }}",
         "options": {
           "timeout": 10000
         }

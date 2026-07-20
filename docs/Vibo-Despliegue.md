@@ -1,11 +1,27 @@
 # Despliegue a producción — runbook
 
-Estado al 2026-07-18: el código está listo (build de producción verde, migraciones
-en el build, `prisma.config.ts` ya separa pooler de conexión directa). Lo que falta
-son servicios y credenciales, que dependen de cuentas.
+**Estado al 2026-07-20: desplegado y verificado en https://vibo-drab.vercel.app**
 
-Los secretos frescos ya están generados en **`.env.produccion.local`** (ignorado por
-git). Borralo cuando termines de cargarlos en Vercel.
+Los pasos 0 a 3 están hechos: el código está en `main`, el proyecto vive en Vercel
+con las variables cargadas, las 11 migraciones corrieron contra Postgres, y los
+planes y el primer `VIBO_ADMIN` están sembrados.
+
+Verificado contra la URL real, no contra el log del build (que una build pase no
+prueba que la app funcione): `/dashboard`, `/admin` y `/cuenta` redirigen a
+`/login` sin sesión; `/api/integracion/*` sin token devuelve 401 con el mensaje
+correcto y no un 500; y un token falso devuelve "Token inválido", que es la
+prueba de que la consulta llegó a Postgres y encontró las tablas.
+
+**Lo que falta es el paso 4 en adelante:** recrear el cliente y el agente en
+producción, y recién ahí cablear el workflow en vivo.
+
+> **Las variables de entorno de Vercel están marcadas como Sensitive**, así que
+> `vercel env pull` devuelve el literal `[SENSITIVE]` y **no** se pueden leer de
+> vuelta. Es correcto que sea así, pero tiene una consecuencia: la
+> `ENCRYPTION_KEY` de producción existe en un solo lugar recuperable, tu
+> `.env.produccion.local`. Copiala a un gestor de contraseñas **antes** de borrar
+> ese archivo — si se pierde, ninguna credencial de agente se puede volver a
+> descifrar y hay que recargarlas todas a mano (SDD §7.1).
 
 ---
 
@@ -103,7 +119,8 @@ está en `Vibo-Integracion-n8n.md`.
 
 Al pegarlos en el workflow `PadelAI` en vivo hay que cambiar, en los 3 nodos HTTP:
 
-- el dominio del túnel por **`https://<tu-dominio>`**
+- el dominio del túnel por **`https://vibo-drab.vercel.app`** (ya reemplazado en
+  `docs/n8n-nodos-vibo.json` y `docs/n8n-nodos-vibo-v2.json`)
 - el `agenteId` por el **nuevo de producción**
 
 Y crear la credencial Header Auth con el token del agente de producción.
