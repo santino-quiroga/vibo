@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AutoRefresco } from "@/components/cliente/auto-refresco";
 import { EstadoConversacionBadge } from "@/components/cliente/estado-conversacion";
 import { FiltroConversaciones } from "@/components/cliente/filtro-conversaciones";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +36,8 @@ export default async function ConversacionesPage({
 
   return (
     <div className="space-y-6">
+      {/* La bandeja se lee sola de Postgres, así que refrescar seguido es barato. */}
+      <AutoRefresco segundos={10} />
       <div>
         <h1 className="t-pagina">Conversaciones</h1>
         <p className="mt-1 text-sm text-neutral-500">

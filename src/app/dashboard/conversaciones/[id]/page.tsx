@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { AutoRefresco } from "@/components/cliente/auto-refresco";
 import { EstadoTurno } from "@/components/cliente/estado-turno";
 import { BotonEnlace } from "@/components/ui/boton-enlace";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +42,10 @@ export default async function HiloPage({
 
   return (
     <div className="space-y-4">
+      {/* El hilo abierto es donde más se nota: si el contacto responde, tiene que
+          aparecer sin recargar. El componente se saltea el refresco mientras hay
+          algo escrito en el cuadro de texto. */}
+      <AutoRefresco segundos={10} />
       <BotonEnlace variant="ghost" size="sm" href="/dashboard/conversaciones">
         ← Conversaciones
       </BotonEnlace>

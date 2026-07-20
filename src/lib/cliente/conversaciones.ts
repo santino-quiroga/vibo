@@ -195,7 +195,21 @@ export const obtenerHilo = cache(async (conversacionId: string): Promise<Hilo | 
 export async function marcarLeida(conversacionId: string): Promise<void> {
   const { clienteId } = await requerirClienteOwner();
   await prisma.conversacion.updateMany({
-    where: { id: conversacionId, agente: { clienteId } },
+    where: {
+      id: conversacionId,
+      agente: { clienteId },
+      // Sólo escribe si de verdad quedó algo sin leer. Antes actualizaba siempre,
+      // lo que estaba bien cuando esto corría una vez por navegación — pero el
+      // hilo ahora se auto-refresca cada pocos segundos (ver AutoRefresco), y sin
+      // esta condición sería un UPDATE por cada refresco de cada pestaña abierta.
+      //
+      // Que siga marcando cuando llega un mensaje con el hilo abierto es
+      // deliberado: si el dueño lo está mirando, está leído.
+      OR: [
+        { leidaAt: null },
+        { leidaAt: { lt: prisma.conversacion.fields.ultimoMensajeAt } },
+      ],
+    },
     data: { leidaAt: new Date() },
   });
 }
