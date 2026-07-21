@@ -178,9 +178,96 @@ la cancha, así que el modelo confirma la que el usuario pidió, no la real.
   que pidió estaba ocupada, se le asignó otra y hay que decírselo.
 ```
 
-Decisión de producto abierta: hoy se reasigna en silencio (pedís la 1, te dan la
-2, y el bot lo informa). Si se prefiere que PREGUNTE antes ("la 1 está ocupada,
-¿te sirve la 2?"), es un cambio de prompt.
+**Resuelto en el Paso 4-ter:** ahora, si el usuario pidió una cancha puntual y
+está ocupada, el bot PREGUNTA antes de darle otra en vez de reasignar en silencio.
+
+---
+
+## PASO 4-ter — Preguntar antes de reasignar (si la pedida está ocupada)
+
+Comportamiento deseado: si el usuario pidió una cancha específica y está tomada,
+el bot ofrece la alternativa y **espera confirmación**, en vez de reservar otra
+directo. Si al usuario le daba igual, se sigue asignando solo (sin fricción).
+
+La clave para distinguir "pidió" de "le da igual": el LLM manda `Cancha` VACÍO
+cuando el usuario no eligió. Tres cambios, ningún nodo nuevo.
+
+**4t-a. Input `Cancha` del tool `create_booking_safe`** — cambiar la descripción
+del `$fromAI` para que quede vacío cuando el usuario no pidió cancha:
+
+```
+={{ $fromAI('Cancha', 'Cancha SOLO si el usuario la pidió explícitamente, formato exacto "Cancha 1" o "Cancha 2". Si le da igual o no mencionó una cancha, dejá este campo VACÍO.', 'string') }}
+```
+
+**4t-b. Nodo `Asignar cancha`** — reemplazar TODO (Ctrl+A, borrar, pegar):
+
+```javascript
+// Asignar cancha — decide la cancha del turno.
+// - Sin cancha pedida (al usuario le da igual) -> primera libre.
+// - Cancha pedida libre -> esa.
+// - Cancha pedida OCUPADA pero otra libre -> NO reasigna sola: devuelve
+//   PEDIDA_OCUPADA + alternativa, para que el bot PREGUNTE antes.
+// - Ninguna libre -> SLOT_OCUPADO.
+
+const req = $('When Executed by Another Workflow').first().json;
+
+const ocupadas = $('Search records').all()
+  .map((i) => {
+    const f = (i.json && i.json.fields) ? i.json.fields : i.json;
+    return String((f && f.Cancha) || '').trim();
+  })
+  .filter(Boolean);
+
+const FALLBACK = ['Cancha 1', 'Cancha 2'];
+let validas = String(req.CanchasValidas || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (!validas.length) validas = FALLBACK;
+
+const pedida = String(req.Cancha || '').trim();
+const pidioCanchaValida = validas.includes(pedida);
+const primeraLibre = validas.find((c) => !ocupadas.includes(c)) || null;
+
+let resultado;
+let cancha = null;
+let alternativa = null;
+
+if (pidioCanchaValida) {
+  if (!ocupadas.includes(pedida)) {
+    resultado = 'OK';
+    cancha = pedida;
+  } else if (primeraLibre) {
+    resultado = 'PEDIDA_OCUPADA';
+    alternativa = primeraLibre;
+  } else {
+    resultado = 'SLOT_OCUPADO';
+  }
+} else {
+  if (primeraLibre) {
+    resultado = 'OK';
+    cancha = primeraLibre;
+  } else {
+    resultado = 'SLOT_OCUPADO';
+  }
+}
+
+const _debug = { ocupadas, validas, pedida, resultado, cancha, alternativa };
+return [{ json: { resultado, cancha, pedida, alternativa, _debug } }];
+```
+
+El `If` no cambia (`resultado === 'OK'` → Create). `PEDIDA_OCUPADA` y
+`SLOT_OCUPADO` van a la rama false (`Edit Fields`), que no reserva.
+
+**4t-c. Nodo `Edit Fields`** (rama de "no reservó") — `mensaje_ia` en modo
+**expresión**, distinto según el caso:
+
+```
+={{ $json.resultado === 'PEDIDA_OCUPADA' ? ('La ' + $json.pedida + ' ya está ocupada a esa hora, pero está libre la ' + $json.alternativa + '. Preguntale al usuario si quiere la ' + $json.alternativa + '. Si acepta, reservá de nuevo indicando ' + $json.alternativa + '.') : 'El turno solicitado acaba de ser ocupado por otra persona. Informale al usuario y ofrecele elegir otro horario.' }}
+```
+
+Cuando el usuario acepta la alternativa, el bot vuelve a llamar
+`create_booking_safe` con esa cancha (ya libre) → reserva normal por el camino OK.
 
 ---
 
