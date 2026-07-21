@@ -154,14 +154,183 @@ nodo Code).
 
 ---
 
-## PASO 5 (recomendado) — Que la lista de canchas venga de Vibo
+## PASO 4-bis — Confirmar la cancha REAL al usuario
 
-Para no depender del fallback hardcodeado y respetar que Vibo es la fuente de
-verdad: en el workflow PADRE (PadelAI), en el tool `create_booking_safe`, agregá
-un input `CanchasValidas` mapeado a una expresión que arme la lista desde el
-contexto de Vibo. Con eso, agregar o quitar una cancha en Vibo se refleja solo,
-sin tocar n8n. (Si preferís, dejá el fallback del Code por ahora y esto queda
-para después — el arreglo funciona igual.)
+Síntoma: J1 reserva Cancha 1 a las 15:30; J2 pide Cancha 1 a las 15:30; el bot
+le confirma "Cancha 1 reservada" **pero en Airtable/Vibo J2 quedó en Cancha 2**.
+La reserva está bien (el Code reasignó); lo que está mal es lo que el bot le
+DICE, porque el subworkflow no le devuelve la cancha asignada.
+
+El nodo `Edit Fields1` (mensaje de éxito) devuelve un texto fijo que no menciona
+la cancha, así que el modelo confirma la que el usuario pidió, no la real.
+
+**Fix:** en `Edit Fields1`, poner `mensaje_ia` en modo **expresión** con:
+
+```
+=Éxito: la reserva quedó en {{ $('Asignar cancha').first().json.cancha }} a las {{ $('When Executed by Another Workflow').first().json.Hora_inicio }}. IMPORTANTE: confirmá al usuario EXACTAMENTE esa cancha y hora — puede ser distinta de la que pidió si esa estaba ocupada.
+```
+
+**Reforzar en el prompt del padre** (flujo CREAR reserva, paso de confirmación):
+
+```
+- La cancha la asigna el sistema y te la devuelve create_booking_safe en su
+  respuesta. Confirmá SIEMPRE esa cancha, NUNCA la que pidió el usuario: si la
+  que pidió estaba ocupada, se le asignó otra y hay que decírselo.
+```
+
+**Resuelto en el Paso 4-ter:** ahora, si el usuario pidió una cancha puntual y
+está ocupada, el bot PREGUNTA antes de darle otra en vez de reasignar en silencio.
+
+---
+
+## PASO 4-ter — Preguntar antes de reasignar (si la pedida está ocupada)
+
+Comportamiento deseado: si el usuario pidió una cancha específica y está tomada,
+el bot ofrece la alternativa y **espera confirmación**, en vez de reservar otra
+directo. Si al usuario le daba igual, se sigue asignando solo (sin fricción).
+
+La clave para distinguir "pidió" de "le da igual": el LLM manda `Cancha` VACÍO
+cuando el usuario no eligió. Tres cambios, ningún nodo nuevo.
+
+**4t-a. Input `Cancha` del tool `create_booking_safe`** — cambiar la descripción
+del `$fromAI` para que quede vacío cuando el usuario no pidió cancha:
+
+```
+={{ $fromAI('Cancha', 'Cancha SOLO si el usuario la pidió explícitamente, formato exacto "Cancha 1" o "Cancha 2". Si le da igual o no mencionó una cancha, dejá este campo VACÍO.', 'string') }}
+```
+
+**4t-b. Nodo `Asignar cancha`** — reemplazar TODO (Ctrl+A, borrar, pegar):
+
+```javascript
+// Asignar cancha — decide la cancha del turno.
+// - Sin cancha pedida (al usuario le da igual) -> primera libre.
+// - Cancha pedida libre -> esa.
+// - Cancha pedida OCUPADA pero otra libre -> NO reasigna sola: devuelve
+//   PEDIDA_OCUPADA + alternativa, para que el bot PREGUNTE antes.
+// - Ninguna libre -> SLOT_OCUPADO.
+
+const req = $('When Executed by Another Workflow').first().json;
+
+const ocupadas = $('Search records').all()
+  .map((i) => {
+    const f = (i.json && i.json.fields) ? i.json.fields : i.json;
+    return String((f && f.Cancha) || '').trim();
+  })
+  .filter(Boolean);
+
+const FALLBACK = ['Cancha 1', 'Cancha 2'];
+let validas = String(req.CanchasValidas || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (!validas.length) validas = FALLBACK;
+
+const pedida = String(req.Cancha || '').trim();
+const pidioCanchaValida = validas.includes(pedida);
+const primeraLibre = validas.find((c) => !ocupadas.includes(c)) || null;
+
+let resultado;
+let cancha = null;
+let alternativa = null;
+
+if (pidioCanchaValida) {
+  if (!ocupadas.includes(pedida)) {
+    resultado = 'OK';
+    cancha = pedida;
+  } else if (primeraLibre) {
+    resultado = 'PEDIDA_OCUPADA';
+    alternativa = primeraLibre;
+  } else {
+    resultado = 'SLOT_OCUPADO';
+  }
+} else {
+  if (primeraLibre) {
+    resultado = 'OK';
+    cancha = primeraLibre;
+  } else {
+    resultado = 'SLOT_OCUPADO';
+  }
+}
+
+const _debug = { ocupadas, validas, pedida, resultado, cancha, alternativa };
+return [{ json: { resultado, cancha, pedida, alternativa, _debug } }];
+```
+
+El `If` no cambia (`resultado === 'OK'` → Create). `PEDIDA_OCUPADA` y
+`SLOT_OCUPADO` van a la rama false (`Edit Fields`), que no reserva.
+
+**4t-c. Nodo `Edit Fields`** (rama de "no reservó") — `mensaje_ia` en modo
+**expresión**, distinto según el caso:
+
+```
+={{ $json.resultado === 'PEDIDA_OCUPADA' ? ('La ' + $json.pedida + ' ya está ocupada a esa hora, pero está libre la ' + $json.alternativa + '. Preguntale al usuario si quiere la ' + $json.alternativa + '. Si acepta, reservá de nuevo indicando ' + $json.alternativa + '.') : 'El turno solicitado acaba de ser ocupado por otra persona. Informale al usuario y ofrecele elegir otro horario.' }}
+```
+
+Cuando el usuario acepta la alternativa, el bot vuelve a llamar
+`create_booking_safe` con esa cancha (ya libre) → reserva normal por el camino OK.
+
+---
+
+## PASO 5 — Que la cantidad de canchas venga de Vibo (mejora)
+
+Hoy la cantidad de canchas está en dos constantes: `FALLBACK` en `Asignar cancha`
+y `TOTAL_CANCHAS` en `get_availability`. Funciona, pero hay que acordarse de
+tocarlas al clonar para otro complejo, y si en Vibo se agrega una cancha, n8n no
+se entera. Esta mejora hace que salga de Vibo, que ya las conoce por agente.
+
+**No se toca el nodo de cache.** La lista se arma directo desde el nodo
+`Vibo - Contexto` (la respuesta cruda de `/contexto`, que ya trae el array
+`canchas`) en la misma expresión del mapeo. Menos lugares donde romperse.
+
+> **OJO — los inputs de un tool NO se agregan en el tool, los declara el
+> subworkflow.** El nodo del padre sólo muestra los campos que el
+> `When Executed by Another Workflow` del subworkflow tiene declarados. Si el
+> input nuevo no aparece para mapear, hay que agregarlo primero en el trigger del
+> subworkflow.
+
+**5a. Tool `create_booking_safe` (parent) — pasar la lista.**
+
+- En el subworkflow `Subworkflow_create_booking_PadelAI`, en el trigger
+  `When Executed by Another Workflow`, **agregá el input** `CanchasValidas` (la
+  lista hoy tiene Nombre, Fecha, Hora_inicio, Cancha, Telefono). Guardá.
+- En el parent, tool `create_booking_safe`, mapeá `CanchasValidas` (expresión
+  fija, NO `$fromAI`):
+
+```
+={{ ($('Vibo - Contexto').first().json.canchas || []).map(c => 'Cancha ' + c.numero).join(',') }}
+```
+
+El nodo `Asignar cancha` ya lee `req.CanchasValidas`, no se toca.
+
+**5b. Tool `get_availability` (parent) — pasar el total.**
+
+- En el subworkflow de `get_availability`, en su trigger, agregá el input
+  `TotalCanchas` (hoy tiene fecha, dia_semana). Guardá.
+- En el parent, tool `get_availability`, mapeá `TotalCanchas`:
+
+```
+={{ ($('Vibo - Contexto').first().json.canchas || []).length }}
+```
+
+En ambos, `|| []` mantiene el fail-open: si Vibo no responde, queda vacío/0 y los
+subworkflows caen a su constante de respaldo en vez de cortar.
+
+**5d. Nodo `merge_slots` (subworkflow get_availability).** Cambiar la constante
+por la lectura del input, con la constante de respaldo por si llega 0/vacío
+(Vibo caído):
+
+```javascript
+const TOTAL_CANCHAS = Number($('When Executed by Another Workflow').first().json.TotalCanchas) || 2;
+```
+
+Con esto, agregar/quitar una cancha en Vibo se refleja solo, y clonar para otro
+complejo no requiere tocar código n8n. El `|| 2` y el `FALLBACK` del Code quedan
+como red: si Vibo no responde, el bot sigue con un default razonable en vez de
+cortar.
+
+**Probar 5:** cambiá temporalmente las canchas del agente en Vibo (agregá una 3ra
+en Agentes → Canchas), mandá un mensaje, y confirmá en el `_debug` de
+`Asignar cancha` que `validas` trae las 3. Volvé a dejarlo en 2 después.
 
 ---
 
