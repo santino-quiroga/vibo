@@ -735,6 +735,56 @@ export async function guardarNotasAction(
   return {};
 }
 
+const suscripcionSchema = z.object({
+  clienteId: z.string().min(1),
+  // Vacío es válido: es cómo se DESvincula una suscripción (ej. se dio de baja
+  // en Mercado Pago). El límite es holgado; el id real de MP es corto.
+  suscripcionId: z.string().max(200, "El id de suscripción es demasiado largo"),
+});
+
+/**
+ * Vincula (o desvincula) la suscripción de Mercado Pago de un cliente (SDD v2 §4).
+ *
+ * El flujo del SDD es manual: Vibo genera la suscripción en Mercado Pago, y de
+ * ahí sale un `preapproval_id` que hay que pegar acá. Es lo que le permite al
+ * webhook (`clienteDelPago`) resolver un pago entrante a su cliente por el
+ * camino explícito, sin depender de que el email del pagador coincida.
+ */
+export async function vincularSuscripcionAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const parsed = suscripcionSchema.safeParse({
+    clienteId: formData.get("clienteId"),
+    suscripcionId: formData.get("suscripcionId") ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const idLimpio = parsed.data.suscripcionId.trim() || null;
+
+  // Un mismo preapproval_id no puede apuntar a dos clientes: si ya está en otro,
+  // el webhook resolvería mal a quién aplicarle el pago. Se rechaza antes.
+  if (idLimpio) {
+    const enOtro = await prisma.cliente.findFirst({
+      where: { mercadoPagoSubscriptionId: idLimpio, id: { not: parsed.data.clienteId } },
+      select: { nombre: true },
+    });
+    if (enOtro) {
+      return { error: `Esa suscripción ya está vinculada a "${enOtro.nombre}".` };
+    }
+  }
+
+  await prisma.cliente.update({
+    where: { id: parsed.data.clienteId },
+    data: { mercadoPagoSubscriptionId: idLimpio },
+  });
+
+  revalidatePath(`/admin/clientes/${parsed.data.clienteId}`);
+  return {};
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Baja de clientes.
  *

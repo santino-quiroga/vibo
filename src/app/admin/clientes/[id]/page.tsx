@@ -23,6 +23,7 @@ import { CambiarPlanForm } from "./cambiar-plan-form";
 import { BajaClienteForm } from "./baja-cliente-form";
 import { MarcarPagadoForm } from "./marcar-pagado-form";
 import { NotasForm } from "./notas-form";
+import { VincularSuscripcionForm } from "./vincular-suscripcion-form";
 import { ReactivarLimiteForm } from "./reactivar-limite-form";
 import { RegenerarPasswordForm } from "./regenerar-password-form";
 
@@ -154,8 +155,11 @@ export default async function ClienteDetallePage({
               </div>
               <div className="sm:col-span-2">
                 <dt className="text-xs text-neutral-500">Suscripción de Mercado Pago</dt>
-                <dd className="font-mono text-xs break-all">
-                  {cliente.mercadoPagoSubscriptionId ?? "— sin vincular —"}
+                <dd>
+                  <VincularSuscripcionForm
+                    clienteId={cliente.id}
+                    suscripcionId={cliente.mercadoPagoSubscriptionId}
+                  />
                 </dd>
               </div>
             </dl>
