@@ -1,0 +1,216 @@
+{
+  "name": "GetAvailability_SubWorkflow",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "fecha"
+            },
+            {
+              "name": "dia_semana"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -240,
+        96
+      ],
+      "id": "a54b8e1c-dcb4-49c2-aa2a-f14246c7685c",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appP5qWjfuoz1lj0g",
+          "mode": "list",
+          "cachedResultName": "PadelAI",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblsBNEMbTlkvvL5R",
+          "mode": "id"
+        },
+        "filterByFormula": "{Activo}=1",
+        "options": {},
+        "sort": {
+          "property": [
+            {
+              "field": "Hora inicio"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -64,
+        16
+      ],
+      "id": "df1c0995-53b5-495f-800c-1b70355fbd58",
+      "name": "horarios",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "b8xT917yKTHf4bvi",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appP5qWjfuoz1lj0g",
+          "mode": "list",
+          "cachedResultName": "PadelAI",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbloWVFfSue1iBY31",
+          "mode": "list",
+          "cachedResultName": "Reservas",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g/tbloWVFfSue1iBY31"
+        },
+        "filterByFormula": "=AND(\n  OR(\n    {Fecha}='{{ $json.fecha }}',\n    DATETIME_FORMAT({Fecha},'YYYY-MM-DD')='{{ $json.fecha }}'\n  ),\n  {Estado}!='Cancelada'\n)",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -64,
+        208
+      ],
+      "id": "d1a5779d-2346-4a68-b161-ed8bdba68826",
+      "name": "check_availability",
+      "settings": {
+        "alwaysOutputData": true
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "b8xT917yKTHf4bvi",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        208,
+        112
+      ],
+      "id": "ffb204f7-cb3c-4a7e-a7c7-1fdcb37a8935",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cruce determinístico horarios vs reservas\n\n// Lee datos del trigger y de los dos nodos Airtable previos\n\n\n\nconst trigger = $('When Executed by Another Workflow').first().json;\n\nconst fecha = (trigger.fecha || '').toString().trim();\n\nconst diaSemana = (trigger.dia_semana || '').toString().trim();\n\n\n\nif (!fecha || !/^\\d{4}-\\d{2}-\\d{2}$/.test(fecha)) {\n\n  return [{ json: {\n\n    error: 'FECHA_INVALIDA',\n\n    message: 'El parámetro fecha debe estar en formato YYYY-MM-DD. Ejemplo: 2026-04-20.'\n\n  } }];\n\n}\n\n\n\nconst diasValidos = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];\n\nif (!diasValidos.includes(diaSemana)) {\n\n  return [{ json: {\n\n    error: 'DIA_INVALIDO',\n\n    message: `dia_semana debe ser uno de: ${diasValidos.join(', ')}. Recibido: '${diaSemana}'`\n\n  } }];\n\n}\n\n\n\nfunction normalizeTime(t) {\n\n  if (!t) return '';\n\n  const s = t.toString().trim();\n\n  const ampm = s.match(/^(\\d{1,2}):(\\d{2})(?::\\d{2})?\\s*(AM|PM)$/i);\n\n  if (ampm) {\n\n    let h = parseInt(ampm[1], 10);\n\n    const m = ampm[2];\n\n    const period = ampm[3].toUpperCase();\n\n    if (period === 'PM' && h !== 12) h += 12;\n\n    if (period === 'AM' && h === 12) h = 0;\n\n    return h.toString().padStart(2, '0') + ':' + m;\n\n  }\n\n  const parts = s.split(':');\n\n  return parts.length >= 2 ? parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0') : s;\n\n}\n\n\n\n// Normaliza un nombre de campo: minúsculas + sin tildes + sin espacios\n\nfunction normKey(k) {\n\n  return k.toString().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]/g, '');\n\n}\n\n\n\n// Busca un campo tolerante a mayúsculas/tildes/espacios.\n\n// Recibe el objeto fields y un array de nombres candidatos.\n\nfunction getField(fields, candidates) {\n\n  const map = {};\n\n  for (const k of Object.keys(fields)) map[normKey(k)] = fields[k];\n\n  for (const c of candidates) {\n\n    const v = map[normKey(c)];\n\n    if (v !== undefined) return v;\n\n  }\n\n  return undefined;\n\n}\n\n\n\n// Leer records de cada nodo Airtable por separado\n\nconst horariosItems = $('horarios').all();\n\nconst reservasItems = $('check_availability').all();\n\n\n\nfunction pickFields(item) {\n\n  // Airtable v2 devuelve fields top-level y también conserva .fields\n\n  return (item && item.json && item.json.fields) ? item.json.fields : (item.json || {});\n\n}\n\n\n\n// Filtrar slots activos del día (multi-select 'Dias Activos')\n\nconst slotsDelDia = horariosItems\n\n  .map(pickFields)\n\n  .filter(r => {\n\n    const dias = getField(r, ['Dias Activos', 'Días activos', 'dias_activos']) || [];\n\n    if (Array.isArray(dias)) return dias.includes(diaSemana);\n\n    return dias.toString().includes(diaSemana);\n\n  });\n\n\n\nif (slotsDelDia.length === 0) {\n\n  return [{ json: {\n\n    fecha,\n\n    dia_semana: diaSemana,\n\n    slots_disponibles: [],\n\n    total_disponibles: 0,\n\n    total_configurados: 0,\n\n    message: `No hay slots configurados para ${diaSemana}. Verificar tabla Configuracion en Airtable.`\n\n  } }];\n\n}\n\n\n\n// Estados que bloquean el slot (normalizados: lowercase + sin tildes)\n\nconst ESTADOS_BLOQUEANTES = ['pendiente', 'confirmada', 'senada'];\n\nfunction normStr(s) {\n\n  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim();\n\n}\n\n\n\nconst ocupados = reservasItems\n\n  .map(pickFields)\n\n  .map(r => normalizeTime(getField(r, ['Hora inicio'])))\n\n  .filter(h => h);\n\n\n\nconst disponibles = slotsDelDia\n\n  .filter(r => !ocupados.includes(normalizeTime(getField(r, ['Hora inicio']))))\n\n  .map(r => ({\n\n    hora_inicio: normalizeTime(getField(r, ['Hora inicio']))\n\n  }));\n\n\n\nreturn [{ json: {\n\n  fecha,\n\n  dia_semana: diaSemana,\n\n  slots_disponibles: disponibles,\n\n  total_disponibles: disponibles.length,\n\n  total_configurados: slotsDelDia.length,\n\n  slots_ocupados_horas: ocupados\n\n} }]; \n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        112
+      ],
+      "id": "76bdd3f4-dee5-46a1-b6da-122654a236dc",
+      "name": "merge_slots"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Solo filtrar si la fecha consultada es hoy\nconst hoy = new Date().toLocaleDateString('en-CA', {\n  timeZone: 'America/Argentina/Buenos_Aires'\n}); // Devuelve YYYY-MM-DD\n\nif (data.fecha !== hoy) {\n  const turnosLimpios = data.slots_disponibles.map(slot => slot.hora_inicio);\n  \n  return [{ json: { \n    fecha: data.fecha,\n    turnos_disponibles: turnosLimpios\n  }}]; \n}\n\n// Es hoy -> obtener hora actual en Argentina\nconst ahoraStr = new Date().toLocaleTimeString('en-GB', {\n  timeZone: 'America/Argentina/Buenos_Aires',\n  hour: '2-digit',\n  minute: '2-digit'\n}); \n\n// Filtrar slots pasados y transformarlos a texto simple\nconst turnosLimpios = data.slots_disponibles\n  .filter(slot => slot.hora_inicio > ahoraStr) \n  .map(slot => slot.hora_inicio);\n\nreturn [{ json: { \n  fecha: data.fecha,\n  turnos_disponibles: turnosLimpios\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        112
+      ],
+      "id": "4579b6df-512c-404a-9c4f-637e668dcfa3",
+      "name": "filtrar_slots_pasados"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "horarios",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "check_availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "horarios": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_availability": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "merge_slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "merge_slots": {
+      "main": [
+        [
+          {
+            "node": "filtrar_slots_pasados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5e226bd4-5e6f-4079-b115-36ad88e5758f",
+  "meta": {
+    "instanceId": "9459351511dcd8d4a218b548a51934c232869e408893d0154e3cace8d9706682"
+  },
+  "id": "mXhgXnnY46A1rhek",
+  "tags": []
+}
