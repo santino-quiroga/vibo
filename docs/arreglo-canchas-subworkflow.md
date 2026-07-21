@@ -154,6 +154,36 @@ nodo Code).
 
 ---
 
+## PASO 4-bis — Confirmar la cancha REAL al usuario
+
+Síntoma: J1 reserva Cancha 1 a las 15:30; J2 pide Cancha 1 a las 15:30; el bot
+le confirma "Cancha 1 reservada" **pero en Airtable/Vibo J2 quedó en Cancha 2**.
+La reserva está bien (el Code reasignó); lo que está mal es lo que el bot le
+DICE, porque el subworkflow no le devuelve la cancha asignada.
+
+El nodo `Edit Fields1` (mensaje de éxito) devuelve un texto fijo que no menciona
+la cancha, así que el modelo confirma la que el usuario pidió, no la real.
+
+**Fix:** en `Edit Fields1`, poner `mensaje_ia` en modo **expresión** con:
+
+```
+=Éxito: la reserva quedó en {{ $('Asignar cancha').first().json.cancha }} a las {{ $('When Executed by Another Workflow').first().json.Hora_inicio }}. IMPORTANTE: confirmá al usuario EXACTAMENTE esa cancha y hora — puede ser distinta de la que pidió si esa estaba ocupada.
+```
+
+**Reforzar en el prompt del padre** (flujo CREAR reserva, paso de confirmación):
+
+```
+- La cancha la asigna el sistema y te la devuelve create_booking_safe en su
+  respuesta. Confirmá SIEMPRE esa cancha, NUNCA la que pidió el usuario: si la
+  que pidió estaba ocupada, se le asignó otra y hay que decírselo.
+```
+
+Decisión de producto abierta: hoy se reasigna en silencio (pedís la 1, te dan la
+2, y el bot lo informa). Si se prefiere que PREGUNTE antes ("la 1 está ocupada,
+¿te sirve la 2?"), es un cambio de prompt.
+
+---
+
 ## PASO 5 — Que la cantidad de canchas venga de Vibo (mejora)
 
 Hoy la cantidad de canchas está en dos constantes: `FALLBACK` en `Asignar cancha`
