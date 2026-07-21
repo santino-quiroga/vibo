@@ -1,0 +1,457 @@
+{
+  "name": "Subworkflow_create_booking_PadelAI",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appP5qWjfuoz1lj0g",
+          "mode": "list",
+          "cachedResultName": "PadelAI",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbloWVFfSue1iBY31",
+          "mode": "list",
+          "cachedResultName": "Reservas",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g/tbloWVFfSue1iBY31"
+        },
+        "filterByFormula": "=AND(DATETIME_FORMAT({Fecha}, 'YYYY-MM-DD') = '{{ $input.first().json.Fecha }}', {Hora inicio} = '{{ $input.first().json.Hora_inicio }}', NOT({Estado} = 'Cancelada'))\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -192,
+        0
+      ],
+      "id": "3791affe-9b34-4061-b111-014634e760df",
+      "name": "Search records",
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "b8xT917yKTHf4bvi",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Nombre"
+            },
+            {
+              "name": "Fecha"
+            },
+            {
+              "name": "Hora_inicio"
+            },
+            {
+              "name": "Cancha"
+            },
+            {
+              "name": "Telefono"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -352,
+        0
+      ],
+      "id": "99468c8a-e7cd-45c2-81d9-393d7cca7944",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7d60c55e-5815-49c1-8349-687d528fa81a",
+              "leftValue": "={{ $json.resultado }}",
+              "rightValue": "OK",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        288,
+        0
+      ],
+      "id": "bce43f1c-4772-4a3a-ae22-f06891add0ae",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d9b847cc-6e10-4640-85b8-d7f0c4e2ca25",
+              "name": "mensaje_ia",
+              "value": "Error: El turno solicitado acaba de ser ocupado por otra persona. Infórmale esto al usuario y pregúntale si desea elegir otro horario.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        96
+      ],
+      "id": "6c4bf2dc-8c49-4221-a7f1-ebe923e601cd",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appP5qWjfuoz1lj0g",
+          "mode": "list",
+          "cachedResultName": "PadelAI",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbloWVFfSue1iBY31",
+          "mode": "list",
+          "cachedResultName": "Reservas",
+          "cachedResultUrl": "https://airtable.com/appP5qWjfuoz1lj0g/tbloWVFfSue1iBY31"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Creada por bot": true,
+            "Duración (min)": 0,
+            "Monto seña": 0,
+            "Nombre": "={{ $('When Executed by Another Workflow').first().json.Nombre }}",
+            "Fecha": "={{ $('When Executed by Another Workflow').first().json.Fecha }}",
+            "Hora inicio": "={{ $('When Executed by Another Workflow').first().json.Hora_inicio }}",
+            "Cancha": "={{ $('Asignar cancha').first().json.cancha }}",
+            "Estado": "Confirmada",
+            "Teléfono": "={{ $('When Executed by Another Workflow').first().json.Telefono }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ID Reserva",
+              "displayName": "ID Reserva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Nombre",
+              "displayName": "Nombre",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Teléfono",
+              "displayName": "Teléfono",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Fecha",
+              "displayName": "Fecha",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Hora inicio",
+              "displayName": "Hora inicio",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Hora fin",
+              "displayName": "Hora fin",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Estado",
+              "displayName": "Estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Pendiente",
+                  "value": "Pendiente"
+                },
+                {
+                  "name": "Confirmada",
+                  "value": "Confirmada"
+                },
+                {
+                  "name": "Señada",
+                  "value": "Señada"
+                },
+                {
+                  "name": "Cancelada",
+                  "value": "Cancelada"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Notas",
+              "displayName": "Notas",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Ultima_Actualizacion",
+              "displayName": "Ultima_Actualizacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Duración (min)",
+              "displayName": "Duración (min)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Cancha",
+              "displayName": "Cancha",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Monto seña",
+              "displayName": "Monto seña",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Creada por bot",
+              "displayName": "Creada por bot",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        -96
+      ],
+      "id": "8c80c034-d346-4fc7-9161-4fb1665ba68b",
+      "name": "Create a record",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "b8xT917yKTHf4bvi",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "03035ac7-6cb5-46dd-9ce4-5cd5fd9a067b",
+              "name": "mensaje_ia",
+              "value": "Éxito: La reserva fue creada en la base de datos. Confírmale los detalles al usuario.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        -80
+      ],
+      "id": "901e2617-6f25-4637-a148-d0197c371b39",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('When Executed by Another Workflow').first().json;\n\nconst ocupadas = $('Search records').all()\n  .map((i) => String(i.json.Cancha || '').trim())\n  .filter(Boolean);\n\nconst FALLBACK = ['Cancha 1', 'Cancha 2'];\nlet validas = String(req.CanchasValidas || '')\n  .split(',').map((s) => s.trim()).filter(Boolean);\nif (!validas.length) validas = FALLBACK;\n\nconst pedida = String(req.Cancha || '').trim();\nconst pedidaEsValida = validas.includes(pedida);\n\nlet elegida = null;\nif (pedidaEsValida && !ocupadas.includes(pedida)) {\n  elegida = pedida;\n} else {\n  elegida = validas.find((c) => !ocupadas.includes(c)) || null;\n}\n\n// Diagnóstico temporal: para entender por qué bloquea. Se saca después.\n}\n\n// Diagnóstico temporal: para entender por qué bloquea. Se saca después.\nconst _debug = {\n  registrosEncontrados: $('Search records').all().length,\n  ocupadas,\n  validas,\n  pedida,\n  fechaPedida: req.Fecha,\n  horaPedida: req.Hora_inicio,\n};\n\nif (!elegida) {\n  return [{ json: { resultado: 'SLOT_OCUPADO', cancha: null, _debug } }];\n}\nreturn [{ json: { resultado: 'OK', cancha: elegida, _debug } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        0
+      ],
+      "id": "bfed9695-df7d-4948-893d-344d5cb4b6e2",
+      "name": "Asignar cancha"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search records": {
+      "main": [
+        [
+          {
+            "node": "Asignar cancha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Create a record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a record": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Asignar cancha": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "45e311ac-3d6a-4f2a-b206-c3de7beac082",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9459351511dcd8d4a218b548a51934c232869e408893d0154e3cace8d9706682"
+  },
+  "id": "PQlCJWV38YuA33Ku",
+  "tags": []
+}
