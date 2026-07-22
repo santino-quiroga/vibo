@@ -259,12 +259,33 @@ model Cancha {
   agenteId         String
   agente           Agente  @relation(fields: [agenteId], references: [id])
   numero           Int // 1, 2, 3... — el backend arma "Cancha {numero}" para cruzar con Airtable
+  // Precio base de la cancha: es el que se cobra en las horas que ninguna franja
+  // cubre, y el fallback histórico de las canchas sin franjas cargadas.
   precio           Decimal @db.Decimal(12, 2)
   duracionTurnoMin Int
   horarioApertura  String // "08:00"
   horarioCierre    String // "23:00"
 
+  // Tarifas por franja horaria: el precio real de un turno depende de la hora
+  // (día vs. noche), no sólo de la cancha. Una franja pisa el precio base en su
+  // rango [horaDesde, horaHasta). Si no hay franjas, se cobra `precio` siempre.
+  franjas TarifaFranja[]
+
   @@unique([agenteId, numero])
+}
+
+// Un tramo horario con su propio precio dentro de una cancha (día/noche, etc.).
+// El precio del turno se resuelve cruzando la hora de inicio de la reserva con
+// estas franjas; lo que quede fuera de todas usa el precio base de la cancha.
+model TarifaFranja {
+  id        String  @id @default(cuid())
+  canchaId  String
+  cancha    Cancha  @relation(fields: [canchaId], references: [id], onDelete: Cascade)
+  horaDesde String // "08:00" — inclusive
+  horaHasta String // "18:00" — exclusivo
+  precio    Decimal @db.Decimal(12, 2)
+
+  @@index([canchaId])
 }
 
 model UsoMensual {

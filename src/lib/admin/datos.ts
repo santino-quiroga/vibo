@@ -127,6 +127,10 @@ export const obtenerAgente = cache(async (id: string) => {
           duracionTurnoMin: true,
           horarioApertura: true,
           horarioCierre: true,
+          franjas: {
+            select: { horaDesde: true, horaHasta: true, precio: true },
+            orderBy: { horaDesde: "asc" },
+          },
         },
         orderBy: { numero: "asc" },
       },

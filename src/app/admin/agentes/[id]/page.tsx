@@ -201,6 +201,11 @@ export default async function AgenteDetallePage({
                 duracionTurnoMin: c.duracionTurnoMin,
                 horarioApertura: c.horarioApertura,
                 horarioCierre: c.horarioCierre,
+                franjas: c.franjas.map((f) => ({
+                  horaDesde: f.horaDesde,
+                  horaHasta: f.horaHasta,
+                  precio: f.precio.toString(),
+                })),
               }))}
             />
           </CardContent>

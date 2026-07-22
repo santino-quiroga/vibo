@@ -93,6 +93,7 @@ export type AgenteDetalle = {
     duracionTurnoMin: number;
     horarioApertura: string;
     horarioCierre: string;
+    franjas: Array<{ horaDesde: string; horaHasta: string; precio: string }>;
   }>;
 };
 
@@ -129,6 +130,10 @@ export const obtenerAgenteDelCliente = cache(
             duracionTurnoMin: true,
             horarioApertura: true,
             horarioCierre: true,
+            franjas: {
+              select: { horaDesde: true, horaHasta: true, precio: true },
+              orderBy: { horaDesde: "asc" },
+            },
           },
           orderBy: { numero: "asc" },
         },
@@ -145,6 +150,11 @@ export const obtenerAgenteDelCliente = cache(
         duracionTurnoMin: c.duracionTurnoMin,
         horarioApertura: c.horarioApertura,
         horarioCierre: c.horarioCierre,
+        franjas: c.franjas.map((f) => ({
+          horaDesde: f.horaDesde,
+          horaHasta: f.horaHasta,
+          precio: f.precio.toString(),
+        })),
       })),
     };
   },

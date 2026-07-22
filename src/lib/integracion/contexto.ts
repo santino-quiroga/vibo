@@ -68,10 +68,16 @@ export type ContextoAgente = {
   faq: string | null;
   canchas: Array<{
     numero: number;
+    /** Precio base: rige en las horas que ninguna franja cubre. */
     precio: number;
     duracionTurnoMin: number;
     horarioApertura: string;
     horarioCierre: string;
+    /**
+     * Tarifas por franja horaria. Vacío = un solo precio a toda hora. Quien arma
+     * el prompt tiene que cotizar por la hora del turno, no por `precio` a secas.
+     */
+    franjas: Array<{ horaDesde: string; horaHasta: string; precio: number }>;
   }>;
 };
 
@@ -117,6 +123,10 @@ export async function construirContexto(
         duracionTurnoMin: true,
         horarioApertura: true,
         horarioCierre: true,
+        franjas: {
+          select: { horaDesde: true, horaHasta: true, precio: true },
+          orderBy: { horaDesde: "asc" },
+        },
       },
       orderBy: { numero: "asc" },
     }),
@@ -160,6 +170,11 @@ export async function construirContexto(
       duracionTurnoMin: c.duracionTurnoMin,
       horarioApertura: c.horarioApertura,
       horarioCierre: c.horarioCierre,
+      franjas: c.franjas.map((f) => ({
+        horaDesde: f.horaDesde,
+        horaHasta: f.horaHasta,
+        precio: Number(f.precio),
+      })),
     })),
   };
 }

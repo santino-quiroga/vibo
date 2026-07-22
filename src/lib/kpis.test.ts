@@ -15,9 +15,11 @@ import {
   calcularOcupacion,
   ingresosEstimados,
   ocurrenciasPorDia,
+  precioEnFranja,
   tasaConversion,
   turnosReservados,
   variacion,
+  type CanchaConfig,
 } from "@/lib/kpis";
 
 function reserva(parcial: Partial<Reserva> & { fecha: string }): Reserva {
@@ -120,9 +122,9 @@ describe("tasaConversion", () => {
 });
 
 describe("ingresosEstimados", () => {
-  const canchas = [
-    { numero: 1, precio: 20000 },
-    { numero: 2, precio: 30000 },
+  const canchas: CanchaConfig[] = [
+    { numero: 1, precio: 20000, franjas: [] },
+    { numero: 2, precio: 30000, franjas: [] },
   ];
 
   it("multiplica confirmadas por el precio de su cancha", () => {
@@ -156,6 +158,50 @@ describe("ingresosEstimados", () => {
     const r = ingresosEstimados(reservas, canchas);
     assert.equal(r.total, 20000);
     assert.equal(r.sinPrecio, 2);
+  });
+
+  it("valúa cada turno por su franja horaria, no por un precio fijo", () => {
+    // Este es el bug reportado: la cancha tiene un precio base (noche) pero de
+    // día se cobra otro. Ingresos tiene que sumar el precio de la franja de cada
+    // turno, no el base multiplicado.
+    const conFranja: CanchaConfig[] = [
+      {
+        numero: 1,
+        precio: 48000, // base (noche)
+        franjas: [{ desdeMin: 8 * 60, hastaMin: 18 * 60, precio: 30000 }],
+      },
+    ];
+    const reservas = [
+      reserva({ fecha: "2026-07-06", cancha: "Cancha 1", horaInicioMin: 12 * 60 + 30 }), // 12:30 → franja
+      reserva({ fecha: "2026-07-06", cancha: "Cancha 1", horaInicioMin: 20 * 60 }), // 20:00 → base
+    ];
+    const r = ingresosEstimados(reservas, conFranja);
+    assert.equal(r.total, 30000 + 48000);
+    // Con franjas no hay un unitario único: la UI lo muestra sin "× precio".
+    assert.equal(r.porCancha[0].precio, null);
+  });
+});
+
+describe("precioEnFranja", () => {
+  const cancha: CanchaConfig = {
+    numero: 1,
+    precio: 48000,
+    franjas: [{ desdeMin: 8 * 60, hastaMin: 18 * 60, precio: 30000 }],
+  };
+
+  it("usa el precio de la franja cuando la hora cae adentro", () => {
+    assert.equal(precioEnFranja(cancha, 12 * 60 + 30), 30000);
+    assert.equal(precioEnFranja(cancha, 8 * 60), 30000); // borde inferior, inclusive
+  });
+
+  it("cae al precio base fuera de toda franja", () => {
+    assert.equal(precioEnFranja(cancha, 18 * 60), 48000); // borde superior, exclusivo
+    assert.equal(precioEnFranja(cancha, 20 * 60), 48000);
+    assert.equal(precioEnFranja(cancha, 7 * 60), 48000);
+  });
+
+  it("sin hora, cobra el precio base", () => {
+    assert.equal(precioEnFranja(cancha, null), 48000);
   });
 });
 
