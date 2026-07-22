@@ -1,6 +1,6 @@
 import "server-only";
 
-import { cicloDe } from "@/lib/ciclo";
+import { cicloDeCliente } from "@/lib/ciclo";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -32,8 +32,6 @@ export type ResultadoReconciliacion = {
 };
 
 export async function reconciliarLimites(): Promise<ResultadoReconciliacion> {
-  const ciclo = cicloDe();
-
   // Clientes con al menos una sede pausada por límite: son los únicos candidatos.
   const clientesConPausa = await prisma.agente.findMany({
     where: { estado: "PAUSADO_LIMITE" },
@@ -44,18 +42,20 @@ export async function reconciliarLimites(): Promise<ResultadoReconciliacion> {
   let sedesReactivadas = 0;
 
   for (const { clienteId } of clientesConPausa) {
-    const [cliente, suma] = await Promise.all([
-      prisma.cliente.findUnique({
-        where: { id: clienteId },
-        select: { plan: { select: { maxConversacionesMes: true } } },
-      }),
-      prisma.usoMensual.aggregate({
-        where: { agente: { clienteId }, cicloInicio: ciclo.inicio },
-        _sum: { conversacionesCount: true },
-      }),
-    ]);
-
+    // El ciclo es por cliente (anclado a su día de cobro), así que se resuelve su
+    // anclaje antes de sumar el pozo. Un mes nuevo del cliente estrena filas en 0
+    // → por debajo del tope → se reactiva.
+    const cliente = await prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { cicloDiaAnclaje: true, plan: { select: { maxConversacionesMes: true } } },
+    });
     if (!cliente) continue;
+
+    const ciclo = cicloDeCliente(cliente.cicloDiaAnclaje);
+    const suma = await prisma.usoMensual.aggregate({
+      where: { agente: { clienteId }, cicloInicio: ciclo.inicio },
+      _sum: { conversacionesCount: true },
+    });
 
     const usadas = suma._sum.conversacionesCount ?? 0;
     if (usadas < cliente.plan.maxConversacionesMes) {
