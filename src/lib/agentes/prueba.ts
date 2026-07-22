@@ -101,10 +101,17 @@ function armarSystemPrompt(ctx: ContextoAgente): string {
   if (datos.length) partes.push(`## NEGOCIO\n${datos.join("\n")}`);
 
   if (ctx.canchas.length) {
-    const filas = ctx.canchas.map(
-      (c) =>
-        `- Cancha ${c.numero}: $${c.precio.toLocaleString("es-AR")} · turnos de ${c.duracionTurnoMin} min · de ${c.horarioApertura} a ${c.horarioCierre}`,
-    );
+    const filas = ctx.canchas.map((c) => {
+      let fila = `- Cancha ${c.numero}: $${c.precio.toLocaleString("es-AR")} (precio base) · turnos de ${c.duracionTurnoMin} min · de ${c.horarioApertura} a ${c.horarioCierre}`;
+      if (c.descripcion) fila += `\n  Descripción: ${c.descripcion}`;
+      if (c.tramos.length) {
+        const bandas = c.tramos
+          .map((t) => `${t.desde}–${t.hasta} $${t.precio.toLocaleString("es-AR")}`)
+          .join("; ");
+        fila += `\n  Precios por horario: ${bandas} (fuera de esas franjas, el precio base)`;
+      }
+      return fila;
+    });
     partes.push(`## CANCHAS Y PRECIOS\n${filas.join("\n")}`);
   }
 

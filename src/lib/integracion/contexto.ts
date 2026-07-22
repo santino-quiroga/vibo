@@ -72,6 +72,14 @@ export type ContextoAgente = {
     duracionTurnoMin: number;
     horarioApertura: string;
     horarioCierre: string;
+    /** Descripción de la cancha (superficie, techada, etc.), o null. */
+    descripcion: string | null;
+    /**
+     * Precios por franja horaria. Vacío = la cancha cotiza siempre `precio`.
+     * Si el inicio del turno cae en un tramo (desde ≤ inicio < hasta), se cobra
+     * el precio del tramo. Los tramos no se solapan.
+     */
+    tramos: Array<{ desde: string; hasta: string; precio: number }>;
   }>;
 };
 
@@ -117,6 +125,11 @@ export async function construirContexto(
         duracionTurnoMin: true,
         horarioApertura: true,
         horarioCierre: true,
+        descripcion: true,
+        tramos: {
+          select: { desde: true, hasta: true, precio: true },
+          orderBy: { desde: "asc" },
+        },
       },
       orderBy: { numero: "asc" },
     }),
@@ -160,6 +173,12 @@ export async function construirContexto(
       duracionTurnoMin: c.duracionTurnoMin,
       horarioApertura: c.horarioApertura,
       horarioCierre: c.horarioCierre,
+      descripcion: texto(c.descripcion),
+      tramos: c.tramos.map((t) => ({
+        desde: t.desde,
+        hasta: t.hasta,
+        precio: Number(t.precio),
+      })),
     })),
   };
 }

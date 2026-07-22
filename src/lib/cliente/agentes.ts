@@ -93,6 +93,8 @@ export type AgenteDetalle = {
     duracionTurnoMin: number;
     horarioApertura: string;
     horarioCierre: string;
+    descripcion: string;
+    tramos: Array<{ desde: string; hasta: string; precio: string }>;
   }>;
 };
 
@@ -129,6 +131,11 @@ export const obtenerAgenteDelCliente = cache(
             duracionTurnoMin: true,
             horarioApertura: true,
             horarioCierre: true,
+            descripcion: true,
+            tramos: {
+              select: { desde: true, hasta: true, precio: true },
+              orderBy: { desde: "asc" },
+            },
           },
           orderBy: { numero: "asc" },
         },
@@ -145,6 +152,14 @@ export const obtenerAgenteDelCliente = cache(
         duracionTurnoMin: c.duracionTurnoMin,
         horarioApertura: c.horarioApertura,
         horarioCierre: c.horarioCierre,
+        // El form es un client component: la descripción viaja como string ("" si
+        // no hay), y el Decimal de cada tramo como string, igual que el precio.
+        descripcion: c.descripcion ?? "",
+        tramos: c.tramos.map((t) => ({
+          desde: t.desde,
+          hasta: t.hasta,
+          precio: t.precio.toString(),
+        })),
       })),
     };
   },
