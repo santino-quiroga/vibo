@@ -13,11 +13,13 @@ import {
   leerSlotsCacheado,
 } from "@/lib/airtable/lectura";
 import { diaDeLaSemana, type Reserva, type Slot } from "@/lib/airtable/tipos";
+import { aMinutos } from "@/lib/canchas-validacion";
 import { requerirClienteOwner } from "@/lib/dal";
 import {
   calcularOcupacion,
   fechasDelPeriodo,
   ingresosEstimados,
+  precioEnTramo,
   tasaConversion,
   turnosReservados,
   variacion,
@@ -107,15 +109,29 @@ function agentesEnAlcance(alcance: Alcance): AgenteEnAlcance[] {
 async function canchasDe(agenteIds: string[]): Promise<Map<string, CanchaConfig[]>> {
   const filas = await prisma.cancha.findMany({
     where: { agenteId: { in: agenteIds } },
-    select: { agenteId: true, numero: true, precio: true },
+    select: {
+      agenteId: true,
+      numero: true,
+      precio: true,
+      tramos: { select: { desde: true, hasta: true, precio: true } },
+    },
   });
 
   const porAgente = new Map<string, CanchaConfig[]>();
   for (const fila of filas) {
     const lista = porAgente.get(fila.agenteId) ?? [];
     // Decimal → number recién acá. El precio de una cancha entra cómodo en un
-    // double; lo que no hay que hacer es guardarlo así.
-    lista.push({ numero: fila.numero, precio: Number(fila.precio) });
+    // double; lo que no hay que hacer es guardarlo así. Los tramos se pasan a
+    // minutos del día para cruzarlos con la hora de inicio de cada turno.
+    lista.push({
+      numero: fila.numero,
+      precio: Number(fila.precio),
+      tramos: fila.tramos.map((t) => ({
+        desdeMin: aMinutos(t.desde),
+        hastaMin: aMinutos(t.hasta),
+        precio: Number(t.precio),
+      })),
+    });
     porAgente.set(fila.agenteId, lista);
   }
   return porAgente;
@@ -406,28 +422,39 @@ export async function datosDeTurnos(
       return;
     }
 
-    const precios = new Map(
-      (canchasPorAgente.get(agente.id) ?? []).map((c) => [c.numero, c.precio]),
+    const configs = new Map(
+      (canchasPorAgente.get(agente.id) ?? []).map((c) => [c.numero, c]),
     );
     descartes += resultado.value.reservas.descartes.length;
 
     for (const reserva of resultado.value.reservas.filas) {
       const numero = reserva.cancha ? numeroDeCancha(reserva.cancha) : null;
+      const config = numero !== null ? configs.get(numero) : undefined;
       turnos.push({
         ...reserva,
         agenteId: agente.id,
         agenteNombre: agente.nombre,
-        // null y no 0: "esta cancha no tiene precio configurado" no es "sale
-        // gratis". La UI los muestra distinto.
-        precio: numero !== null ? (precios.get(numero) ?? null) : null,
+        // El precio real depende de la hora del turno, no sólo de la cancha
+        // (franja día/noche). null y no 0: "esta cancha no tiene precio
+        // configurado" no es "sale gratis". La UI los muestra distinto.
+        precio: config ? precioEnTramo(config, reserva.horaInicioMin) : null,
       });
     }
   });
 
-  // Más próximos primero: es el orden en que un dueño mira su agenda.
+  // Las más nuevas arriba, tipo pila: la reserva que entró recién queda primera.
+  // Se ordena por "ID Reserva" (el autonumber de Airtable, que crece con cada
+  // alta), así "nuevo" es orden en que se cargó la reserva y no la fecha del
+  // partido. Una fila sin ID cae al fondo —no puede pretender ser la más nueva—
+  // y desempata por fecha/hora, también de más reciente a más viejo.
   turnos.sort((a, b) => {
-    if (a.fecha !== b.fecha) return a.fecha.localeCompare(b.fecha);
-    return (a.horaInicioMin ?? 0) - (b.horaInicioMin ?? 0);
+    if (a.idReserva !== b.idReserva) {
+      if (a.idReserva === null) return 1;
+      if (b.idReserva === null) return -1;
+      return b.idReserva - a.idReserva;
+    }
+    if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+    return (b.horaInicioMin ?? 0) - (a.horaInicioMin ?? 0);
   });
 
   const canchasDisponibles = [

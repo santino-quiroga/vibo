@@ -15,11 +15,42 @@
 import { numeroDeCancha } from "@/lib/airtable/campos";
 import { diaDeLaSemana, type FechaCalendario, type Reserva, type Slot } from "@/lib/airtable/tipos";
 
+/** Un tramo horario con su precio, en minutos del día: [desdeMin, hastaMin). */
+export type TramoConfig = {
+  desdeMin: number;
+  hastaMin: number;
+  precio: number;
+};
+
 /** La config de canchas de Vibo: el precio no vive en Airtable (punto 8.1). */
 export type CanchaConfig = {
   numero: number;
+  /** Precio base: se cobra en las horas que ningún tramo cubre. */
   precio: number;
+  /** Precios por franja horaria; vacío = un solo precio a toda hora. */
+  tramos: TramoConfig[];
 };
+
+/**
+ * El precio de un turno en una cancha, según su hora de inicio.
+ *
+ * El precio real no es uno solo por cancha: cambia por franja (día vs. noche).
+ * Se busca el tramo que contiene la hora —rango [desde, hasta)— y, si ninguno la
+ * cubre (o el turno no tiene hora), cae al precio base. Los tramos se validan sin
+ * solaparse al guardar (`canchas-validacion.ts`), así "el primero" es el único.
+ */
+export function precioEnTramo(
+  cancha: CanchaConfig,
+  horaInicioMin: number | null,
+): number {
+  if (horaInicioMin !== null) {
+    const tramo = cancha.tramos.find(
+      (t) => horaInicioMin >= t.desdeMin && horaInicioMin < t.hastaMin,
+    );
+    if (tramo) return tramo.precio;
+  }
+  return cancha.precio;
+}
 
 export type Periodo = {
   desde: FechaCalendario;
@@ -87,8 +118,17 @@ export function tasaConversion(
 
 export type Ingresos = {
   total: number;
-  /** Desglose por cancha, para que el número no sea una caja negra. */
-  porCancha: Array<{ numero: number; turnos: number; precio: number; subtotal: number }>;
+  /**
+   * Desglose por cancha, para que el número no sea una caja negra. `precio` es el
+   * unitario sólo cuando la cancha cobra igual a toda hora; con tramos distintos
+   * es `null` (no hay un "× precio" único que dé el subtotal).
+   */
+  porCancha: Array<{
+    numero: number;
+    turnos: number;
+    precio: number | null;
+    subtotal: number;
+  }>;
   /**
    * Turnos confirmados que no se pudieron valuar porque su cancha no está
    * configurada en Vibo (o el texto de Airtable no sigue "Cancha N").
@@ -98,29 +138,39 @@ export type Ingresos = {
 };
 
 /**
- * Ingresos estimados (6.1): Σ confirmados por cancha × precio configurado en Vibo.
+ * Ingresos estimados (6.1): Σ confirmados valuados por su precio de franja.
+ *
+ * No es turnos × un precio fijo por cancha: cada turno se valúa por su hora
+ * (`precioEnTramo`), porque la misma cancha cobra distinto de día y de noche.
  */
 export function ingresosEstimados(
   reservas: Reserva[],
   canchas: CanchaConfig[],
 ): Ingresos {
-  const precioPorNumero = new Map(canchas.map((c) => [c.numero, c.precio]));
-  const conteo = new Map<number, number>();
+  const porNumero = new Map(canchas.map((c) => [c.numero, c]));
+  const acum = new Map<number, { turnos: number; subtotal: number }>();
   let sinPrecio = 0;
 
   for (const reserva of turnosConfirmados(reservas)) {
     const numero = reserva.cancha ? numeroDeCancha(reserva.cancha) : null;
-    if (numero === null || !precioPorNumero.has(numero)) {
+    const cancha = numero !== null ? porNumero.get(numero) : undefined;
+    if (numero === null || !cancha) {
       sinPrecio++;
       continue;
     }
-    conteo.set(numero, (conteo.get(numero) ?? 0) + 1);
+    const a = acum.get(numero) ?? { turnos: 0, subtotal: 0 };
+    a.turnos += 1;
+    a.subtotal += precioEnTramo(cancha, reserva.horaInicioMin);
+    acum.set(numero, a);
   }
 
-  const porCancha = [...conteo.entries()]
-    .map(([numero, turnos]) => {
-      const precio = precioPorNumero.get(numero) ?? 0;
-      return { numero, turnos, precio, subtotal: turnos * precio };
+  const porCancha = [...acum.entries()]
+    .map(([numero, { turnos, subtotal }]) => {
+      // El unitario sólo tiene sentido sin tramos: con tramos, "turnos × precio"
+      // dejaría de dar el subtotal, así que se muestra sin él.
+      const cancha = porNumero.get(numero);
+      const precio = cancha && cancha.tramos.length === 0 ? cancha.precio : null;
+      return { numero, turnos, precio, subtotal };
     })
     .sort((a, b) => a.numero - b.numero);
 

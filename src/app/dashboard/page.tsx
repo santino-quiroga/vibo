@@ -230,7 +230,10 @@ export default async function InicioPage({
                           Cancha {cancha.numero}
                           <span className="text-neutral-400">
                             {" "}
-                            · {cancha.turnos} × {moneda.format(cancha.precio)}
+                            ·{" "}
+                            {cancha.precio !== null
+                              ? `${cancha.turnos} × ${moneda.format(cancha.precio)}`
+                              : `${cancha.turnos} turno(s), varias franjas`}
                           </span>
                         </span>
                         <span className="font-medium tabular-nums">
