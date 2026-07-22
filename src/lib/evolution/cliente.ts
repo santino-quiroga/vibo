@@ -1,6 +1,7 @@
 import "server-only";
 
 import { descifrar } from "@/lib/crypto";
+import { normalizarNumero } from "@/lib/evolution/numero";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -92,6 +93,14 @@ export async function enviarTexto(
   const creds = await credencialesDe(agenteId);
   const url = `${creds.baseUrl}/message/sendText/${encodeURIComponent(creds.instancia)}`;
 
+  const numero = normalizarNumero(telefono);
+  if (!numero) {
+    throw new ErrorEvolution(
+      "desconocido",
+      `Teléfono del contacto sin dígitos utilizables: ${JSON.stringify(telefono)}`,
+    );
+  }
+
   let respuesta: Response;
   try {
     respuesta = await fetch(url, {
@@ -100,7 +109,7 @@ export async function enviarTexto(
         "Content-Type": "application/json",
         apikey: creds.apiKey,
       },
-      body: JSON.stringify({ number: telefono, text: texto }),
+      body: JSON.stringify({ number: numero, text: texto }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (error) {

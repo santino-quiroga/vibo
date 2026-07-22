@@ -3,7 +3,7 @@ import "server-only";
 import { cache } from "react";
 
 import { ZONA_HORARIA } from "@/lib/airtable/tipos";
-import { cicloDe, etiquetaCiclo } from "@/lib/ciclo";
+import { cicloDeCliente, etiquetaCiclo } from "@/lib/ciclo";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -35,13 +35,19 @@ export type UsoPlan = {
 };
 
 export const usoDelCliente = cache(async (clienteId: string): Promise<UsoPlan> => {
-  const ciclo = cicloDe();
+  // El ciclo se ancla al día de cobro del cliente, así que primero hace falta su
+  // `cicloDiaAnclaje` para saber qué pozo sumar (requerimiento de testing).
+  const cliente = await prisma.cliente.findUnique({
+    where: { id: clienteId },
+    select: {
+      cicloDiaAnclaje: true,
+      plan: { select: { nombre: true, maxConversacionesMes: true } },
+    },
+  });
 
-  const [cliente, suma, pausadas] = await Promise.all([
-    prisma.cliente.findUnique({
-      where: { id: clienteId },
-      select: { plan: { select: { nombre: true, maxConversacionesMes: true } } },
-    }),
+  const ciclo = cicloDeCliente(cliente?.cicloDiaAnclaje);
+
+  const [suma, pausadas] = await Promise.all([
     prisma.usoMensual.aggregate({
       where: { agente: { clienteId }, cicloInicio: ciclo.inicio },
       _sum: { conversacionesCount: true },

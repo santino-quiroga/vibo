@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { EstadoAgenteBadge } from "@/components/estado-agente";
+import { CopiarId } from "@/components/copiar-id";
 import { BotonEnlace } from "@/components/ui/boton-enlace";
 import {
   Card,
@@ -272,6 +273,7 @@ export default async function ClienteDetallePage({
                           </span>
                         )}
                       </p>
+                      <CopiarId valor={agente.id} etiqueta="Agente ID" className="mt-1" />
                     </div>
                     <div className="flex items-center gap-2">
                       <EstadoAgenteBadge estado={agente.estado} />

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { cicloDe } from "@/lib/ciclo";
+import { cicloDeCliente } from "@/lib/ciclo";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -44,24 +44,21 @@ export async function registrarConsumoYEvaluar(
   agenteId: string,
   conversacionId: string,
 ): Promise<ResultadoConsumo> {
-  const ciclo = cicloDe();
-
   return prisma.$transaction(async (tx) => {
-    // 1. CAS: solo cuenta si esta conversación no fue contada ya en este ciclo.
-    const cas = await tx.conversacion.updateMany({
-      where: {
-        id: conversacionId,
-        OR: [{ contadaEnCiclo: null }, { contadaEnCiclo: { not: ciclo.inicio } }],
-      },
-      data: { contadaEnCiclo: ciclo.inicio },
-    });
-    const contada = cas.count === 1;
-
-    // Se necesita el cliente y su tope aunque no se cuente, para devolver el
-    // estado del pozo a quien llama.
+    // Se resuelve el cliente ANTES del conteo: el ciclo se ancla a su día de
+    // cobro (requerimiento de testing), así que hace falta su `cicloDiaAnclaje`
+    // para saber a qué pozo se cuenta. Sin cliente, no se cuenta contra nada.
     const agente = await tx.agente.findUnique({
       where: { id: agenteId },
-      select: { clienteId: true, cliente: { select: { plan: { select: { maxConversacionesMes: true } } } } },
+      select: {
+        clienteId: true,
+        cliente: {
+          select: {
+            cicloDiaAnclaje: true,
+            plan: { select: { maxConversacionesMes: true } },
+          },
+        },
+      },
     });
     if (!agente) {
       // No debería pasar: el token ya resolvió a un agente. Si pasa, no se
@@ -71,6 +68,17 @@ export async function registrarConsumoYEvaluar(
 
     const clienteId = agente.clienteId;
     const limite = agente.cliente.plan.maxConversacionesMes;
+    const ciclo = cicloDeCliente(agente.cliente.cicloDiaAnclaje);
+
+    // 1. CAS: solo cuenta si esta conversación no fue contada ya en este ciclo.
+    const cas = await tx.conversacion.updateMany({
+      where: {
+        id: conversacionId,
+        OR: [{ contadaEnCiclo: null }, { contadaEnCiclo: { not: ciclo.inicio } }],
+      },
+      data: { contadaEnCiclo: ciclo.inicio },
+    });
+    const contada = cas.count === 1;
 
     if (contada) {
       // 2. Incrementa el uso del agente para el ciclo (crea la fila si es la

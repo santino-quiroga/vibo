@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { leerCupoAgentes, planAdmite } from "@/lib/admin/limite-agentes";
 import { parsearCanchasDeForm, reemplazarCanchas } from "@/lib/canchas";
+import { diaDelMesAR } from "@/lib/ciclo";
 import { cifrar, generarTokenIntegracion } from "@/lib/crypto";
 import { requerirViboAdmin } from "@/lib/dal";
 import { hashPassword } from "@/lib/password";
@@ -560,6 +561,10 @@ export async function marcarPagadoAction(
       data: {
         estadoPago: "AL_DIA",
         fechaProximoCobro: proximo,
+        // El pozo de conversaciones renueva el día del cobro, no el 1° calendario
+        // (requerimiento de testing). Se ancla al día del pago; el próximo cobro
+        // cae en el mismo día del mes siguiente.
+        cicloDiaAnclaje: diaDelMesAR(ahora),
         graciaDesde: null,
         ultimoAvisoPagoEn: null,
       },

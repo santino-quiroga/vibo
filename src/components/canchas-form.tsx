@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Editor de canchas y precios, compartido por el admin y el panel cliente
@@ -23,12 +24,20 @@ export type AccionCanchas = (
   formData: FormData,
 ) => Promise<EstadoCanchas>;
 
+export type TramoEditable = {
+  desde: string;
+  hasta: string;
+  precio: string;
+};
+
 export type CanchaEditable = {
   numero: number;
   precio: string;
   duracionTurnoMin: number;
   horarioApertura: string;
   horarioCierre: string;
+  descripcion: string;
+  tramos: TramoEditable[];
 };
 
 const INICIAL: EstadoCanchas = {};
@@ -41,7 +50,14 @@ function canchaNueva(numero: number): CanchaEditable {
     duracionTurnoMin: 90,
     horarioApertura: "08:00",
     horarioCierre: "23:00",
+    descripcion: "",
+    tramos: [],
   };
+}
+
+/** Una franja nueva arranca en el horario pico típico de una cancha. */
+function tramoNuevo(): TramoEditable {
+  return { desde: "18:00", hasta: "24:00", precio: "" };
 }
 
 function BotonSubmit() {
@@ -92,6 +108,10 @@ export function CanchasForm({
     );
   }
 
+  function editarTramos(indice: number, tramos: TramoEditable[]) {
+    setFilas(filas.map((fila, i) => (i === indice ? { ...fila, tramos } : fila)));
+  }
+
   return (
     <form action={formAction} className="space-y-4">
       {estado.error && (
@@ -123,6 +143,10 @@ export function CanchasForm({
                 </Button>
               </div>
 
+              {/* Los tramos de esta cancha viajan como un JSON, paralelo al resto
+                  de las columnas (lo lee `parsearCanchasDeForm`). */}
+              <input type="hidden" name="tramos" value={JSON.stringify(fila.tramos)} />
+
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div className="space-y-1">
                   <Label htmlFor={`numero-${i}`} className="text-xs">
@@ -141,7 +165,7 @@ export function CanchasForm({
 
                 <div className="space-y-1">
                   <Label htmlFor={`precio-${i}`} className="text-xs">
-                    Precio
+                    Precio base
                   </Label>
                   <Input
                     id={`precio-${i}`}
@@ -200,6 +224,32 @@ export function CanchasForm({
                   />
                 </div>
               </div>
+
+              <p className="mt-1 text-[11px] text-neutral-400">
+                Si la cancha cierra pasada la medianoche, poné el cierre de
+                madrugada (ej. 01:00): se entiende como del día siguiente.
+              </p>
+
+              <div className="mt-3 space-y-1">
+                <Label htmlFor={`descripcion-${i}`} className="text-xs">
+                  Descripción <span className="text-neutral-400">(opcional)</span>
+                </Label>
+                <Textarea
+                  id={`descripcion-${i}`}
+                  name="descripcion"
+                  rows={2}
+                  placeholder="Ej. Cancha techada, césped sintético, iluminación LED."
+                  value={fila.descripcion}
+                  onChange={(e) => editar(i, "descripcion", e.target.value)}
+                />
+              </div>
+
+              <TramosCancha
+                indice={i}
+                precioBase={fila.precio}
+                tramos={fila.tramos}
+                onChange={(tramos) => editarTramos(i, tramos)}
+              />
             </div>
           ))}
         </div>
@@ -212,5 +262,102 @@ export function CanchasForm({
         <BotonSubmit />
       </div>
     </form>
+  );
+}
+
+/**
+ * Editor de las franjas de precio de una cancha (requerimiento de testing:
+ * distintos precios según el horario). Sin franjas, la cancha cotiza siempre el
+ * precio base; cada franja lo pisa en su horario.
+ */
+function TramosCancha({
+  indice,
+  precioBase,
+  tramos,
+  onChange,
+}: {
+  indice: number;
+  precioBase: string;
+  tramos: TramoEditable[];
+  onChange: (tramos: TramoEditable[]) => void;
+}) {
+  function agregar() {
+    onChange([...tramos, tramoNuevo()]);
+  }
+
+  function quitar(j: number) {
+    onChange(tramos.filter((_, k) => k !== j));
+  }
+
+  function editar(j: number, campo: keyof TramoEditable, valor: string) {
+    onChange(tramos.map((t, k) => (k === j ? { ...t, [campo]: valor } : t)));
+  }
+
+  return (
+    <div className="mt-3 border-t border-neutral-200 pt-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="etiqueta text-xs">Precios por horario</span>
+        <Button type="button" variant="ghost" size="sm" onClick={agregar}>
+          Agregar franja
+        </Button>
+      </div>
+
+      {tramos.length === 0 ? (
+        <p className="text-[11px] text-neutral-400">
+          Sin franjas: todos los turnos cotizan el precio base
+          {precioBase ? ` ($${precioBase})` : ""}.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {tramos.map((tramo, j) => (
+            <div key={j} className="grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+              <div className="space-y-1">
+                <Label htmlFor={`tramo-desde-${indice}-${j}`} className="text-[11px]">
+                  Desde
+                </Label>
+                <Input
+                  id={`tramo-desde-${indice}-${j}`}
+                  type="time"
+                  value={tramo.desde}
+                  onChange={(e) => editar(j, "desde", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor={`tramo-hasta-${indice}-${j}`} className="text-[11px]">
+                  Hasta
+                </Label>
+                <Input
+                  id={`tramo-hasta-${indice}-${j}`}
+                  type="time"
+                  value={tramo.hasta === "24:00" ? "00:00" : tramo.hasta}
+                  onChange={(e) =>
+                    // 00:00 al final de una franja se guarda como 24:00 (medianoche
+                    // = fin del día), que es lo que el backend interpreta.
+                    editar(j, "hasta", e.target.value === "00:00" ? "24:00" : e.target.value)
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor={`tramo-precio-${indice}-${j}`} className="text-[11px]">
+                  Precio
+                </Label>
+                <Input
+                  id={`tramo-precio-${indice}-${j}`}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="25000"
+                  value={tramo.precio}
+                  onChange={(e) => editar(j, "precio", e.target.value)}
+                />
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => quitar(j)}>
+                Quitar
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

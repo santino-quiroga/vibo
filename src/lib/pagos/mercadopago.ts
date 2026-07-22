@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { EstadoPagoRegistro } from "@/generated/prisma/enums";
+import { diaDelMesAR } from "@/lib/ciclo";
 import { enviarAvisoPago } from "@/lib/email";
 import { diasDeGracia } from "@/lib/pagos/cobranza-cron";
 import { prisma } from "@/lib/prisma";
@@ -181,6 +182,9 @@ export async function aplicarPago(pago: PagoMercadoPago): Promise<ResultadoProce
         data: {
           estadoPago: "AL_DIA",
           fechaProximoCobro: proximo,
+          // El pozo de conversaciones renueva el día del cobro, no el 1°
+          // calendario (requerimiento de testing): se ancla al día del pago.
+          cicloDiaAnclaje: diaDelMesAR(pago.fecha),
           graciaDesde: null,
           ultimoAvisoPagoEn: null,
         },

@@ -52,6 +52,15 @@ function Turno({
       <p className="text-foreground truncate text-[13px] font-medium" title={nombre}>
         {nombre}
       </p>
+      {/* El teléfono de quien reservó (requerimiento de testing): en recepción
+          hace falta para llamar/confirmar. Sólo se muestra como línea aparte
+          cuando además hay nombre; si no hay nombre, el teléfono ya ocupa la
+          línea principal de arriba y repetirlo sería ruido. */}
+      {turno.nombre && turno.telefono && (
+        <p className="truncate font-mono text-[11px] text-neutral-400" title={turno.telefono}>
+          {turno.telefono}
+        </p>
+      )}
       {variasSedes && turno.agenteNombre && (
         <p className="truncate text-[11px] text-neutral-400">{turno.agenteNombre}</p>
       )}

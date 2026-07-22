@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { EstadoAgenteBadge } from "@/components/estado-agente";
+import { CopiarId } from "@/components/copiar-id";
 import { TogglePausa } from "@/components/cliente/toggle-pausa";
 import { Card, CardContent } from "@/components/ui/card";
 import { agentesConMetricas } from "@/lib/cliente/agentes";
@@ -70,6 +71,9 @@ export default async function AgentesPage() {
                   </Link>
                   <EstadoAgenteBadge estado={agente.estado} />
                 </div>
+
+                <CopiarId valor={agente.id} etiqueta="Agente ID" />
+
 
                 <div className="flex items-center gap-2 text-xs text-neutral-500">
                   <span

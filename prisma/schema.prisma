@@ -95,6 +95,12 @@ model Cliente {
   mercadoPagoSubscriptionId String?
   estadoPago                EstadoPago @default(SIN_SUSCRIPCION)
   fechaProximoCobro         DateTime?
+  // Día del mes (1–28) en que se renueva el pozo de conversaciones del cliente
+  // (requerimiento de testing: la renovación debe ser un mes post-pago, no el
+  // 1° calendario). Se sella con el día del cobro cuando se registra un pago.
+  // Null = sin suscripción todavía → el ciclo cae al mes calendario (día 1),
+  // que es el comportamiento histórico. Ver [[vibo-sprint-estado]] y `lib/ciclo.ts`.
+  cicloDiaAnclaje           Int?
   // Cuándo entró en EN_GRACIA. Es lo que el cron usa para saber si ya se
   // agotaron los días de gracia, y para mandar el recordatorio del medio.
   graciaDesde               DateTime?
@@ -259,12 +265,43 @@ model Cancha {
   agenteId         String
   agente           Agente  @relation(fields: [agenteId], references: [id])
   numero           Int // 1, 2, 3... — el backend arma "Cancha {numero}" para cruzar con Airtable
+  // Precio BASE de la cancha: el que se cotiza cuando el turno no cae en ninguna
+  // banda horaria. Los `tramos` lo pisan para las franjas que definan.
   precio           Decimal @db.Decimal(12, 2)
   duracionTurnoMin Int
-  horarioApertura  String // "08:00"
-  horarioCierre    String // "23:00"
+  // "08:00" — el horario de cierre puede ser MENOR al de apertura cuando el
+  // complejo cierra pasada la medianoche (ej. abre 18:00, cierra 02:00): el
+  // cierre se interpreta como del día siguiente. Ver `lib/canchas.ts`.
+  horarioApertura  String
+  horarioCierre    String // "23:00" (o "02:00" si cierra de madrugada)
+  // Descripción libre de la cancha (requerimiento de testing): superficie,
+  // techada/descubierta, iluminación, etc. La ve el dueño y la cotiza el bot.
+  descripcion      String? @db.Text
+
+  // Precios diferenciales por franja horaria (requerimiento de testing). Una
+  // cancha puede no tener ninguno (cotiza siempre `precio`) o varios. Si el
+  // inicio de un turno cae en un tramo, se cobra el precio del tramo.
+  tramos TramoPrecio[]
 
   @@unique([agenteId, numero])
+}
+
+// Un precio distinto para una franja horaria de una cancha (requerimiento de
+// testing: "distintos precios dependiendo el horario del turno").
+//
+// El precio de la cancha (`Cancha.precio`) sigue siendo el precio base / de
+// fallback; cada tramo lo pisa para su franja. Los tramos NO pueden solaparse
+// entre sí (lo valida `lib/canchas.ts`), así que el precio de un horario es
+// determinista: como mucho un tramo lo contiene.
+model TramoPrecio {
+  id       String  @id @default(cuid())
+  canchaId String
+  cancha   Cancha  @relation(fields: [canchaId], references: [id], onDelete: Cascade)
+  desde    String // "18:00" — inicio de la franja, inclusive
+  hasta    String // "24:00" — fin de la franja, exclusive ("24:00" = medianoche)
+  precio   Decimal @db.Decimal(12, 2)
+
+  @@index([canchaId])
 }
 
 model UsoMensual {
