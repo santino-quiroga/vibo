@@ -2,6 +2,9 @@ import "server-only";
 
 import type { EstadoConversacion, RemitenteMensaje } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
+import { resolverDecisionVentana, type DecisionVentana } from "@/lib/integracion/ventana";
+
+export { resolverDecisionVentana, type DecisionVentana };
 
 /**
  * Registro de mensajes: el corazón de las Conversaciones.
@@ -119,6 +122,72 @@ export async function registrarMensaje(
 
     return { conversacionId: conversacion.id, mensajeId: mensaje.id, estado };
   });
+}
+
+/**
+ * Ventana de escucha: decide si ESTA ejecución de n8n es la que responde, y con
+ * qué texto (SDD v2 §11).
+ *
+ * El problema: si un contacto manda varios mensajes seguidos, el workflow madre
+ * dispara una ejecución por mensaje y el bot contesta cada uno por separado. La
+ * solución reparte la lógica: n8n espera una ventana fija (~9s, nodo Wait) tras
+ * cada mensaje y después pregunta acá; Vibo decide quién responde, porque es lo
+ * único con estado consistente entre ejecuciones.
+ *
+ * Regla: **responde sólo la ejecución del último mensaje del lote**, y responde
+ * por todos juntos. El "lote pendiente" son los CONTACTO posteriores al último
+ * mensaje IA/HUMANO (ese es el cursor; no hace falta guardar nada extra). Bajo
+ * un orden total determinista (createdAt, id) hay un único máximo: esa ejecución
+ * responde, las demás se paran. Así exactamente una contesta y ninguna cuenta de
+ * más (el uso ya se contó al loguear, dedup por conversación/ciclo).
+ *
+ * No confía en `mensajeId` como "el último por haber llegado": lo compara contra
+ * el máximo real del lote en la base, que es lo que ven todas las ejecuciones.
+ */
+export async function decidirRespuestaVentana(
+  agenteId: string,
+  telefono: string,
+  mensajeId: string,
+): Promise<DecisionVentana> {
+  const conversacion = await prisma.conversacion.findUnique({
+    where: { agenteId_contactoTelefono: { agenteId, contactoTelefono: telefono } },
+    select: { id: true, pausadaManual: true },
+  });
+
+  // El mensaje se loguea ANTES de la ventana, así que la conversación existe. Si
+  // no está, algo se salió del flujo esperado: no responder es lo seguro.
+  if (!conversacion) {
+    return { responder: false, textoAgrupado: "", motivo: "conversacion_inexistente" };
+  }
+
+  // Si el dueño tomó el control (o el bot derivó) durante la ventana, la IA no
+  // responde en este chat. /contexto igual lo cortaría, pero cortar acá evita
+  // llamar al LLM al pedo.
+  if (conversacion.pausadaManual) {
+    return { responder: false, textoAgrupado: "", motivo: "conversacion_en_manual" };
+  }
+
+  // El cursor del lote: el último mensaje que NO es del contacto (una respuesta
+  // de la IA o del dueño cierra el lote anterior).
+  const cursor = await prisma.mensaje.findFirst({
+    where: { conversacionId: conversacion.id, remitente: { in: ["IA", "HUMANO"] } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { createdAt: true },
+  });
+
+  const lote = await prisma.mensaje.findMany({
+    where: {
+      conversacionId: conversacion.id,
+      remitente: "CONTACTO",
+      ...(cursor ? { createdAt: { gt: cursor.createdAt } } : {}),
+    },
+    // Orden ascendente: el último elemento es el máximo bajo el orden total
+    // (createdAt, id) — el que tiene que responder.
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, contenido: true },
+  });
+
+  return resolverDecisionVentana(lote, mensajeId);
 }
 
 /**

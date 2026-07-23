@@ -48,6 +48,8 @@ export const obtenerCliente = cache(async (id: string) => {
       // al resto: es el dato que explica por qué un agente está pausado.
       archivadoAt: true,
       notasInternas: true,
+      // WhatsApp del dueño para los avisos de atención humana (SDD v2 §12).
+      telefonoWhatsapp: true,
       estadoPago: true,
       fechaProximoCobro: true,
       graciaDesde: true,

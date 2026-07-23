@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "instanceId": "vibo-integracion-v3",
+    "descripcion": "Nodos para la ventana de escucha (SDD v2 §11) y la derivación a atención humana (§12). Pegar en el workflow madre y reemplazar los placeholders REEMPLAZAR-*. Ver docs/Vibo-Integracion-n8n.md."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "amount": 9,
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [0, 16],
+      "id": "b2c0d000-0000-4000-8000-000000000020",
+      "name": "Vibo - Ventana escucha",
+      "webhookId": "vibo-ventana-escucha"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REEMPLAZAR-POR-LA-URL-DE-VIBO/api/integracion/mensajes/decidir",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agenteId\": \"REEMPLAZAR-AGENTE-ID\",\n  \"telefono\": \"{{ $('Vibo - Preparar').first().json.telefono }}\",\n  \"mensajeId\": \"{{ $('Vibo - Log contacto').first().json.mensajeId }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [160, 16],
+      "id": "b2c0d000-0000-4000-8000-000000000021",
+      "name": "Vibo - Decidir ventana",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-responder",
+              "leftValue": "={{ $json.responder }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [320, 16],
+      "id": "b2c0d000-0000-4000-8000-000000000022",
+      "name": "Vibo - ¿Responder ventana?"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Deriva la conversación a una persona del equipo. Usala SOLO cuando no puedas resolver el pedido: el cliente pide hablar con un humano, es algo fuera de lo que hacés (un reclamo, un caso raro) o hay un error. Después de usarla, respondé al cliente con un mensaje corto avisando que en un momento lo atiende alguien del equipo.",
+        "method": "POST",
+        "url": "=REEMPLAZAR-POR-LA-URL-DE-VIBO/api/integracion/agentes/REEMPLAZAR-AGENTE-ID/derivar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"telefono\": \"{{ $('Vibo - Preparar').first().json.telefono }}\",\n  \"motivo\": \"{{ $fromAI('motivo', 'motivo breve de la derivacion en texto plano sin comillas', 'string') }}\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [480, 200],
+      "id": "b2c0d000-0000-4000-8000-000000000023",
+      "name": "derivar_a_humano"
+    }
+  ],
+  "connections": {
+    "Vibo - Ventana escucha": {
+      "main": [
+        [
+          {
+            "node": "Vibo - Decidir ventana",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vibo - Decidir ventana": {
+      "main": [
+        [
+          {
+            "node": "Vibo - ¿Responder ventana?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "derivar_a_humano": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

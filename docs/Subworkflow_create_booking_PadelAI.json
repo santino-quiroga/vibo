@@ -55,6 +55,9 @@
             },
             {
               "name": "Telefono"
+            },
+            {
+              "name": "CanchasValidas"
             }
           ]
         }
@@ -108,7 +111,7 @@
             {
               "id": "d9b847cc-6e10-4640-85b8-d7f0c4e2ca25",
               "name": "mensaje_ia",
-              "value": "Error: El turno solicitado acaba de ser ocupado por otra persona. Infórmale esto al usuario y pregúntale si desea elegir otro horario.",
+              "value": "={{ $json.resultado === 'PEDIDA_OCUPADA' ? ('La ' + $json.pedida + ' ya está ocupada a esa hora, pero está libre la ' + $json.alternativa + '. Preguntale al usuario si quiere la ' + $json.alternativa + '. Si acepta, reservá de nuevo indicando ' + $json.alternativa + '.') : 'El turno solicitado acaba de ser ocupado por otra persona. Informale al usuario y ofrecele elegir otro horario.' }}",
               "type": "string"
             }
           ]
@@ -347,7 +350,7 @@
             {
               "id": "03035ac7-6cb5-46dd-9ce4-5cd5fd9a067b",
               "name": "mensaje_ia",
-              "value": "Éxito: La reserva fue creada en la base de datos. Confírmale los detalles al usuario.",
+              "value": "=Éxito: la reserva quedó en {{ $('Asignar cancha').first().json.cancha }} a las {{ $('When Executed by Another Workflow').first().json.Hora_inicio }}. IMPORTANTE: confirmá al usuario EXACTAMENTE esa cancha y hora — puede ser distinta de la que pidió si esa estaba ocupada.",
               "type": "string"
             }
           ]
@@ -365,7 +368,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const req = $('When Executed by Another Workflow').first().json;\n\nconst ocupadas = $('Search records').all()\n  .map((i) => String(i.json.Cancha || '').trim())\n  .filter(Boolean);\n\nconst FALLBACK = ['Cancha 1', 'Cancha 2'];\nlet validas = String(req.CanchasValidas || '')\n  .split(',').map((s) => s.trim()).filter(Boolean);\nif (!validas.length) validas = FALLBACK;\n\nconst pedida = String(req.Cancha || '').trim();\nconst pedidaEsValida = validas.includes(pedida);\n\nlet elegida = null;\nif (pedidaEsValida && !ocupadas.includes(pedida)) {\n  elegida = pedida;\n} else {\n  elegida = validas.find((c) => !ocupadas.includes(c)) || null;\n}\n\n// Diagnóstico temporal: para entender por qué bloquea. Se saca después.\n}\n\n// Diagnóstico temporal: para entender por qué bloquea. Se saca después.\nconst _debug = {\n  registrosEncontrados: $('Search records').all().length,\n  ocupadas,\n  validas,\n  pedida,\n  fechaPedida: req.Fecha,\n  horaPedida: req.Hora_inicio,\n};\n\nif (!elegida) {\n  return [{ json: { resultado: 'SLOT_OCUPADO', cancha: null, _debug } }];\n}\nreturn [{ json: { resultado: 'OK', cancha: elegida, _debug } }];"
+        "jsCode": "// Asignar cancha — decide la cancha del turno.\n// - Sin cancha pedida (al usuario le da igual) -> primera libre.\n// - Cancha pedida libre -> esa.\n// - Cancha pedida OCUPADA pero otra libre -> NO reasigna sola: devuelve\n//   PEDIDA_OCUPADA + alternativa, para que el bot PREGUNTE antes.\n// - Ninguna libre -> SLOT_OCUPADO.\n\nconst req = $('When Executed by Another Workflow').first().json;\n\nconst ocupadas = $('Search records').all()\n  .map((i) => {\n    const f = (i.json && i.json.fields) ? i.json.fields : i.json;\n    return String((f && f.Cancha) || '').trim();\n  })\n  .filter(Boolean);\n\nconst FALLBACK = ['Cancha 1', 'Cancha 2'];\nlet validas = String(req.CanchasValidas || '')\n  .split(',')\n  .map((s) => s.trim())\n  .filter(Boolean);\nif (!validas.length) validas = FALLBACK;\n\nconst pedida = String(req.Cancha || '').trim();\nconst pidioCanchaValida = validas.includes(pedida);\nconst primeraLibre = validas.find((c) => !ocupadas.includes(c)) || null;\n\nlet resultado;\nlet cancha = null;\nlet alternativa = null;\n\nif (pidioCanchaValida) {\n  if (!ocupadas.includes(pedida)) {\n    resultado = 'OK';\n    cancha = pedida;\n  } else if (primeraLibre) {\n    resultado = 'PEDIDA_OCUPADA';\n    alternativa = primeraLibre;\n  } else {\n    resultado = 'SLOT_OCUPADO';\n  }\n} else {\n  if (primeraLibre) {\n    resultado = 'OK';\n    cancha = primeraLibre;\n  } else {\n    resultado = 'SLOT_OCUPADO';\n  }\n}\n\nconst _debug = { ocupadas, validas, pedida, resultado, cancha, alternativa };\nreturn [{ json: { resultado, cancha, pedida, alternativa, _debug } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -447,7 +450,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "45e311ac-3d6a-4f2a-b206-c3de7beac082",
+  "versionId": "a1a63021-da85-4b3b-ad95-70bfe4477228",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "9459351511dcd8d4a218b548a51934c232869e408893d0154e3cace8d9706682"

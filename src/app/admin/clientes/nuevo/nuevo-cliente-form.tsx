@@ -91,6 +91,20 @@ export function NuevoClienteForm({ planes }: { planes: Plan[] }) {
         </p>
       </div>
 
+      <div className="space-y-2">
+        <Label htmlFor="telefonoWhatsapp">WhatsApp del dueño (opcional)</Label>
+        <Input
+          id="telefonoWhatsapp"
+          name="telefonoWhatsapp"
+          type="tel"
+          placeholder="5491144440001"
+        />
+        <p className="text-xs text-neutral-500">
+          A este número le avisa el bot cuando una conversación necesita atención
+          humana. Se puede cargar después.
+        </p>
+      </div>
+
       <div className="flex gap-2 pt-2">
         <BotonSubmit />
         <BotonEnlace variant="outline" href="/admin">

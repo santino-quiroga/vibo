@@ -250,6 +250,109 @@ model Usuario {
 
 ---
 
-## 11. Cierre
+## 11. Ventana de escucha (agrupación de mensajes entrantes)
 
-Con la v2 completa, Vibo pasa de ser un panel de visibilidad sobre un agente que en realidad vive aparte (v1) a ser la **fuente de verdad real** del comportamiento del agente (prompt, reglas, precios) y del negocio de Vibo mismo (facturación, salud de clientes) — no solo del negocio de cada cliente individual.
+**Problema.** Si un contacto manda varios mensajes seguidos ("Hola" … "¿tenés turno hoy a la noche?"), el workflow madre dispara una ejecución por mensaje y el bot responde cada uno por separado, en vez de leerlos juntos y contestar una sola vez.
+
+**Decisión.** Se espera una **ventana fija de ~8–10 segundos** desde cada mensaje entrante; si llegan más mensajes de ese mismo contacto en el lapso, se agrupan y se genera **una sola respuesta**. El valor es **igual para todos los agentes de la plataforma y no configurable por cliente**.
+
+**Dónde vive la lógica: repartida.**
+
+- El *esperar* vive en **n8n** (plano de ejecución): un nodo **Wait** con la constante `VENTANA_ESCUCHA_S` en el template del workflow. Al ser una constante del template compartido, es platform-wide por construcción; Vibo no la almacena ni la impone.
+- El *decidir quién responde y con qué texto* vive en **Vibo** (plano de control): es lo único con estado consistente y operaciones atómicas. El static data de n8n no es transaccional y no sirve para coordinar entre ejecuciones.
+
+**Principio.** Cada mensaje sigue disparando su propia ejecución, pero **solo la ejecución del último mensaje del lote responde**, y responde por todos juntos. No hace falta buffer ni cron: el "lote pendiente" ya está definido por los datos que existen.
+
+**Flujo en el workflow madre:**
+
+```
+Webhook → Code → Vibo - Log contacto (POST /mensajes, CONTACTO)   ← ya existe; ahora devuelve mensajeId
+  → Wait (VENTANA_ESCUCHA_S ≈ 9s)                                  ← nodo nuevo
+  → Vibo - Decidir ventana (POST /mensajes/decidir)                ← nodo nuevo
+  → If (responder):
+       false → FIN (otro mensaje del lote responde, o quedó en manual)
+       true  → Vibo - Contexto → ¿Responder? → AI Agent1 → HTTP Request (Evolution) → Vibo - Log IA
+```
+
+- `Vibo - Log contacto` queda **antes** del Wait (posición actual): cada ejecución loguea su mensaje enseguida para que las demás lo vean dentro de la ventana.
+- El **AI Agent1** deja de leer `{{ $('Vibo - Preparar').first().json.texto }}` y pasa a leer `{{ $('Vibo - Decidir ventana').first().json.textoAgrupado }}` — el texto ya concatenado.
+
+**Endpoints:**
+
+- **Nuevo — `POST /api/integracion/mensajes/decidir`** · Body `{ agenteId, telefono, mensajeId }` → `{ responder, textoAgrupado, motivo }`.
+  - Calcula el **lote pendiente** `B` = los mensajes `CONTACTO` posteriores al último `IA`/`HUMANO` de la conversación.
+  - Bajo un **orden total determinista** `(createdAt desc, id desc)`, sea `L = max(B)`. Devuelve `responder: true` **solo si `mensajeId === L`**. Si la conversación quedó `pausadaManual` durante la ventana, devuelve `false` con motivo `conversacion_en_manual`.
+  - `textoAgrupado` = los contenidos de `B` unidos por `\n`. Con un solo mensaje es idéntico al comportamiento actual (backward-compatible).
+- **Modificado — `POST /api/integracion/mensajes`**: agrega `mensajeId` a la respuesta (aditivo). El conteo de uso no cambia: sigue siendo una vez por conversación nueva del ciclo (`contadaEnCiclo`).
+
+**Sin cambios de esquema.** El "cursor" del lote es el último mensaje `IA`/`HUMANO`, que ya existe en la tabla `Mensaje`.
+
+**Condiciones de carrera:**
+
+- *Exactamente uno responde.* Con ventanas de igual duración, los tiempos de decisión respetan el orden de llegada. Un mensaje intermedio, al decidir, ya ve al posterior logueado y se para; el último no ve ninguno posterior y responde por todo `B`. Bajo el orden total hay un único `max(B)`.
+- *Que nadie responda.* Solo si muere la ejecución del último mensaje — misma fiabilidad que hoy (una ejecución por mensaje). El lote queda pendiente y lo levanta el próximo mensaje del contacto.
+- *Doble respuesta por reintento.* El nodo `Decidir ventana` va **sin retry** (documentado en el contrato). Riesgo residual: un mensaje que entra al filo de la ventana con commit atrasado más que el resto del lapso → dos respuestas. Es raro y no corrompe datos. Endurecerlo pediría un claim atómico en la conversación (`respondidoHasta`); **no se agrega en v1** para no meter esquema donde no hace falta.
+
+---
+
+## 12. Notificación al dueño cuando una conversación requiere atención humana
+
+**Problema.** El estado `REQUIERE_ATENCION_HUMANA` ya existe pero no dispara ninguna notificación: el dueño solo se entera si entra a mirar Conversaciones. Además, **hoy ese estado solo lo produce el propio dueño** (toma control o responde a mano) — no hay ningún camino automático.
+
+**Decisión.** Se agrega un **disparador automático** (el bot deriva cuando no puede resolver) y, la **primera vez** que una conversación entra a `REQUIERE_ATENCION_HUMANA` por esa vía, se le manda un **WhatsApp al dueño**. No se repite mientras sigue en ese estado y llegan más mensajes.
+
+**Modelo de datos (2 campos):**
+
+```prisma
+model Cliente {
+  // ...
+  telefonoWhatsapp String?   // número del dueño para avisos operativos
+}
+
+model Conversacion {
+  // ...
+  atencionHumanaNotificadaAt DateTime?  // se sella al avisar; se limpia al devolver el control a la IA
+}
+```
+
+- El número vive en **Cliente** (uno por complejo): el "dueño" es uno por cliente, aunque tenga varias sedes.
+
+**Disparador — tool del bot + endpoint nuevo.**
+
+```
+POST /api/integracion/agentes/{agenteId}/derivar
+Header: Authorization: Bearer <token del agente>
+Body: { "telefono": "...", "motivo": "..."? }
+```
+
+El `AI Agent1` de n8n gana una **tool `derivar_a_humano(motivo)`** que llama a este endpoint cuando no puede resolver (el cliente pide un humano, pedido fuera de alcance, error). El endpoint, en orden:
+
+1. Marca la conversación `pausadaManual = true` + `estado = REQUIERE_ATENCION_HUMANA`. Poner `pausadaManual` es lo que hace que el bot **deje de responderle** a ese contacto (via `/contexto` → `conversacion_en_manual`) y que los CONTACTO siguientes **mantengan** el estado sin volver a la IA.
+2. **Claim atómico del aviso:** `updateMany where atencionHumanaNotificadaAt IS NULL set = now()`. Si gana (afectó 1 fila) sigue; si no, alguien ya avisó y no repite — resuelve dos derivaciones casi simultáneas sin doble WhatsApp.
+3. Si ganó el claim, arma el mensaje y lo manda con **`enviarTexto(agenteId, telefonoDueño, msg)`**, reusando el cliente de Evolution existente y la **instancia de la sede que escaló** (no hay instancia global: el aviso sale del WhatsApp de esa sede). Best-effort: si el envío falla, se loguea y no se tumba la derivación.
+
+**Idempotencia — "solo la primera vez".** El aviso se dispara **únicamente desde `/derivar`** y solo si el claim gana. `registrarMensaje` **no** notifica: un CONTACTO que mantiene el estado mientras está en manual no es un episodio nuevo. El flag se **limpia a null** cuando el dueño **devuelve el control a la IA** (`alternarControlAction` con `tomar=false`); ahí termina el episodio y una derivación futura vuelve a avisar. Las transiciones iniciadas por el dueño (tomar control, responder a mano) **no** notifican.
+
+**Contenido del aviso (sede + contacto + link):**
+
+```
+🔔 Un chat necesita tu atención
+
+Sede: Club Padel AI
+Contacto: Martina Gómez (5491144440001)
+
+Abrilo acá: https://<vibo>/dashboard/conversaciones/<id>
+```
+
+Nombre y teléfono del contacto son datos que el dueño ya ve en el panel; no expone nada nuevo. No incluye el texto de la conversación.
+
+**Reusos y entregables.**
+
+- Reusa `enviarTexto`/Evolution, el estado `REQUIERE_ATENCION_HUMANA` y el patrón de **nodos-para-pegar** (`docs/n8n-nodos-vibo-v3.json`) — el workflow no se actualiza por API porque descarta credenciales.
+- UI: campo de teléfono del dueño en el alta/edición de Cliente en el admin interno.
+
+---
+
+## 13. Cierre
+
+Con la v2 completa, Vibo pasa de ser un panel de visibilidad sobre un agente que en realidad vive aparte (v1) a ser la **fuente de verdad real** del comportamiento del agente (prompt, reglas, precios) y del negocio de Vibo mismo (facturación, salud de clientes) — no solo del negocio de cada cliente individual. Las secciones 11 y 12 cierran además dos huecos de experiencia del canal real: agrupar los mensajes que un contacto manda de a ráfagas, y avisarle al dueño cuando el bot necesita que intervenga una persona.

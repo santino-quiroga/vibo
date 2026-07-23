@@ -26,6 +26,7 @@ import { MarcarPagadoForm } from "./marcar-pagado-form";
 import { NotasForm } from "./notas-form";
 import { ReactivarLimiteForm } from "./reactivar-limite-form";
 import { RegenerarPasswordForm } from "./regenerar-password-form";
+import { TelefonoDuenoForm } from "./telefono-dueno-form";
 
 export const metadata: Metadata = { title: "Cliente | Admin Vibo" };
 
@@ -215,7 +216,7 @@ export default async function ClienteDetallePage({
               Estas son las credenciales que se le entregan al cliente.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-5">
             {owner ? (
               <div className="space-y-3">
                 <p className="font-mono text-sm">{owner.email}</p>
@@ -226,6 +227,18 @@ export default async function ClienteDetallePage({
                 Este cliente no tiene usuario dueño. No puede entrar al panel.
               </p>
             )}
+
+            <div className="border-t border-neutral-200 pt-4">
+              <p className="text-sm font-medium">WhatsApp para avisos</p>
+              <p className="mt-1 mb-3 text-xs text-neutral-500">
+                A este número le avisa el bot cuando una conversación necesita
+                atención humana. Vacío = no se avisa.
+              </p>
+              <TelefonoDuenoForm
+                clienteId={cliente.id}
+                telefono={cliente.telefonoWhatsapp}
+              />
+            </div>
           </CardContent>
         </Card>
 

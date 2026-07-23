@@ -107,6 +107,13 @@ model Cliente {
   // Hasta dónde se avisó por email, para no repetir el mismo aviso cada día que
   // corre el cron (§4.5 son 3 emails puntuales, no un goteo diario).
   ultimoAvisoPagoEn         DateTime?
+  // WhatsApp del dueño para avisos operativos (SDD v2 §12). Hoy lo usa la
+  // notificación de "requiere atención humana": cuando el bot deriva una
+  // conversación, se le manda un WhatsApp acá. Es un número por complejo (el
+  // dueño es uno por cliente, aunque tenga varias sedes). Null = no se puede
+  // avisar; la derivación ocurre igual, sin notificación. El aviso sale por la
+  // instancia de Evolution de la sede que escaló (no hay instancia global).
+  telefonoWhatsapp          String?
   pagos                     Pago[]
 }
 
@@ -337,6 +344,14 @@ model Conversacion {
   // el sello acá permite un compare-and-set atómico y O(1), sin recontar
   // mensajes en el camino caliente.
   contadaEnCiclo   DateTime?
+  // Idempotencia del aviso al dueño de "requiere atención humana" (SDD v2 §12).
+  // Se sella con un claim atómico la primera vez que el bot deriva esta
+  // conversación, para no mandar dos WhatsApp si dos derivaciones caen casi
+  // juntas. Se limpia a null cuando el dueño devuelve el control a la IA
+  // (alternarControlAction): ahí termina el episodio y una derivación futura
+  // vuelve a avisar. Que un CONTACTO mantenga el estado mientras está en manual
+  // NO es un episodio nuevo, por eso el aviso sólo lo dispara la derivación.
+  atencionHumanaNotificadaAt DateTime?
   mensajes         Mensaje[]
 
   // Una sola conversación continua por contacto y agente, como un chat de
