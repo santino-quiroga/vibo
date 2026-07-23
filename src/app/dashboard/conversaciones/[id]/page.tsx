@@ -12,6 +12,7 @@ import { horaCompleta } from "@/lib/cliente/formato";
 import { requerirClienteOwner } from "@/lib/dal";
 import { cn } from "@/lib/utils";
 
+import { HiloScroll } from "./hilo-scroll";
 import { PanelChat } from "./panel-chat";
 
 export const metadata: Metadata = { title: "Conversación | Vibo" };
@@ -65,20 +66,18 @@ export default async function HiloPage({
             <CardContent>
               {/* El hilo scrollea dentro de su caja para no estirar la página en
                   chats largos. Alto acotado para que la barra de envío quede a la
-                  vista sin scrollear todo.
-
-                  `flex-col-reverse` + la lista invertida deja la caja anclada
-                  abajo (último mensaje) desde el primer render, sin parpadeo ni
-                  JS: al abrir se ven los mensajes más nuevos, como en WhatsApp.
-                  El orden visual sigue siendo viejo→nuevo de arriba hacia abajo.
-                  `justify-end` mantiene los chats cortos pegados arriba. */}
-              <div className="flex max-h-[55vh] flex-col-reverse justify-end gap-3 overflow-y-auto pr-1">
+                  vista sin scrollear todo. HiloScroll (cliente) lo abre anclado
+                  al último mensaje y sigue el fondo con el auto-refresco. */}
+              <HiloScroll
+                dep={hilo.mensajes.length}
+                className="max-h-[55vh] space-y-3 overflow-y-auto pr-1"
+              >
                 {hilo.mensajes.length === 0 ? (
                   <p className="py-6 text-center text-sm text-neutral-500">
                     Todavía no hay mensajes en esta conversación.
                   </p>
                 ) : (
-                  hilo.mensajes.slice().reverse().map((mensaje) => {
+                  hilo.mensajes.map((mensaje) => {
                     const config = REMITENTE[mensaje.remitente];
                     const derecha = config.lado === "der";
                     return (
@@ -108,7 +107,7 @@ export default async function HiloPage({
                     );
                   })
                 )}
-              </div>
+              </HiloScroll>
             </CardContent>
           </Card>
 
