@@ -536,9 +536,16 @@ placeholders `REEMPLAZAR-POR-LA-URL-DE-VIBO` y `REEMPLAZAR-AGENTE-ID`.
      podría devolver `responder: true` y duplicar la respuesta (el diseño no lleva
      claim persistente a propósito, §11).
 3. **En `AI Agent1`, cambiar el campo *Text*** de
-   `{{ $('Vibo - Preparar').first().json.texto }}` a
-   `{{ $('Vibo - Decidir ventana').first().json.textoAgrupado }}`. Sin esto, el bot
-   contesta un solo mensaje aunque hayas agrupado.
+   `{{ $('Vibo - Preparar').first().json.texto }}` a:
+   ```
+   {{ $('Vibo - Decidir ventana').first().json.textoAgrupado || $('Vibo - Preparar').first().json.texto }}
+   ```
+   El `||` es **fail-open y obligatorio**: si `Vibo - Decidir ventana` falla o
+   devuelve algo sin `textoAgrupado` (Vibo caído, 404, timeout), el nodo pasa por
+   *Continue On Fail* y sin este fallback el AI Agent recibiría un prompt vacío y
+   **crashea** (`No prompt specified`). Con el fallback, en ese caso el bot
+   responde el mensaje suelto (sin agrupar) en vez de romperse. Sin el `||`, el
+   camino feliz funciona igual, pero cualquier hipo de Vibo tira la ejecución.
 4. **El If `Vibo - ¿Responder ventana?`** va antes del `Vibo - Contexto`: si
    `responder` es false, cortás sin llamar al LLM.
 
