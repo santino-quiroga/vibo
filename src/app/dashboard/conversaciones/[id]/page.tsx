@@ -65,14 +65,20 @@ export default async function HiloPage({
             <CardContent>
               {/* El hilo scrollea dentro de su caja para no estirar la página en
                   chats largos. Alto acotado para que la barra de envío quede a la
-                  vista sin scrollear todo. */}
-              <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
+                  vista sin scrollear todo.
+
+                  `flex-col-reverse` + la lista invertida deja la caja anclada
+                  abajo (último mensaje) desde el primer render, sin parpadeo ni
+                  JS: al abrir se ven los mensajes más nuevos, como en WhatsApp.
+                  El orden visual sigue siendo viejo→nuevo de arriba hacia abajo.
+                  `justify-end` mantiene los chats cortos pegados arriba. */}
+              <div className="flex max-h-[55vh] flex-col-reverse justify-end gap-3 overflow-y-auto pr-1">
                 {hilo.mensajes.length === 0 ? (
                   <p className="py-6 text-center text-sm text-neutral-500">
                     Todavía no hay mensajes en esta conversación.
                   </p>
                 ) : (
-                  hilo.mensajes.map((mensaje) => {
+                  hilo.mensajes.slice().reverse().map((mensaje) => {
                     const config = REMITENTE[mensaje.remitente];
                     const derecha = config.lado === "der";
                     return (
