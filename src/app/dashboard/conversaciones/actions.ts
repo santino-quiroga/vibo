@@ -47,6 +47,11 @@ export async function alternarControlAction(
       // Al tomar el control, si hay algo pendiente queda marcado para atender;
       // al devolverlo, vuelve a manos de la IA.
       estado: tomar ? "REQUIERE_ATENCION_HUMANA" : "ABIERTA",
+      // Devolver el control cierra el episodio de atención humana: se limpia el
+      // flag de aviso (SDD v2 §12) para que, si el bot vuelve a derivar más
+      // adelante, se le avise de nuevo al dueño. Al tomar el control no se toca:
+      // ese camino no dispara aviso (el dueño ya está mirando).
+      ...(tomar ? {} : { atencionHumanaNotificadaAt: null }),
     },
   });
 

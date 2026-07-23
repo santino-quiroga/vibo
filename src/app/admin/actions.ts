@@ -29,6 +29,10 @@ const clienteSchema = z.object({
   nombre: z.string().trim().min(2, "El nombre del complejo es obligatorio"),
   planId: z.string().min(1, "Elegí un plan"),
   emailOwner: z.string().trim().toLowerCase().email("Email inválido"),
+  // WhatsApp del dueño para los avisos de atención humana (SDD v2 §12). Opcional:
+  // sin él, la derivación funciona pero no hay a quién notificar. Se guarda tal
+  // cual lo escribe el admin; `enviarTexto` normaliza el número al mandar.
+  telefonoWhatsapp: z.string().trim().optional(),
 });
 
 export async function crearClienteAction(
@@ -48,7 +52,7 @@ export async function crearClienteAction(
 
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  const { nombre, planId, emailOwner } = parsed.data;
+  const { nombre, planId, emailOwner, telefonoWhatsapp } = parsed.data;
 
   const plan = await prisma.plan.findUnique({ where: { id: planId } });
   if (!plan) return { error: "El plan seleccionado no existe" };
@@ -71,6 +75,7 @@ export async function crearClienteAction(
       data: {
         nombre,
         planId,
+        telefonoWhatsapp: telefonoWhatsapp || null,
         usuarios: {
           create: { email: emailOwner, passwordHash, rol: "CLIENTE_OWNER" },
         },
@@ -738,6 +743,38 @@ export async function guardarNotasAction(
 
   revalidatePath(`/admin/clientes/${parsed.data.clienteId}`);
   return {};
+}
+
+const telefonoDuenoSchema = z.object({
+  clienteId: z.string().min(1),
+  telefonoWhatsapp: z.string().trim().max(30, "El teléfono es demasiado largo"),
+});
+
+/**
+ * Guarda el WhatsApp del dueño para los avisos de atención humana (SDD v2 §12).
+ *
+ * Vacío = borrarlo: dejar de avisar. Se guarda tal cual se escribe; el número se
+ * normaliza recién al enviar (`enviarTexto`), igual que el teléfono del contacto.
+ */
+export async function guardarTelefonoDuenoAction(
+  _previo: EstadoAdmin,
+  formData: FormData,
+): Promise<EstadoAdmin> {
+  await requerirViboAdmin();
+
+  const parsed = telefonoDuenoSchema.safeParse({
+    clienteId: formData.get("clienteId"),
+    telefonoWhatsapp: formData.get("telefonoWhatsapp") ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  await prisma.cliente.update({
+    where: { id: parsed.data.clienteId },
+    data: { telefonoWhatsapp: parsed.data.telefonoWhatsapp || null },
+  });
+
+  revalidatePath(`/admin/clientes/${parsed.data.clienteId}`);
+  return { ok: true };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

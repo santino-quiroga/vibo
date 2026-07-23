@@ -86,6 +86,9 @@ export async function POST(request: Request) {
     {
       ok: true,
       conversacionId: resultado.conversacionId,
+      // n8n lo manda de vuelta en /mensajes/decidir para saber si esta ejecución
+      // es la que responde por el lote de la ventana de escucha (SDD v2 §11).
+      mensajeId: resultado.mensajeId,
       estado: resultado.estado,
       // Se le devuelve a n8n el estado del pozo: útil para loguear, y avisa si a
       // partir de este mensaje el cliente quedó bloqueado.

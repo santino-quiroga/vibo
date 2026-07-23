@@ -200,28 +200,157 @@ entrante del contacto, otra con la respuesta de la IA.
 > mismo contacto sin miedo a contar de más: Vibo deduplica por conversación y
 > ciclo.
 
+La respuesta de este endpoint ahora también trae **`mensajeId`** (el id del
+mensaje que se acaba de loguear). Se usa para la ventana de escucha (endpoint 3).
+
+---
+
+## Endpoint 3 — Decidir respuesta de la ventana de escucha ⭐ (SDD v2 §11)
+
+```
+POST /api/integracion/mensajes/decidir
+Content-Type: application/json
+```
+
+Resuelve el problema de que un contacto mande varios mensajes seguidos y el bot
+conteste cada uno por separado. Se llama **después de un nodo Wait de ~9s**,
+pasando el `mensajeId` que devolvió el log del CONTACTO. Vibo responde si **esta**
+ejecución es la del último mensaje del lote y, si lo es, el **texto de todos los
+mensajes agrupados** para pasárselos juntos al LLM.
+
+La idea: cada mensaje sigue disparando su propia ejecución del workflow, pero
+**sólo la del último mensaje responde**, por todos juntos. Las demás se paran.
+
+**Cuerpo:**
+
+```json
+{
+  "agenteId": "cmxxxx…",
+  "telefono": "5491144440001",
+  "mensajeId": "cmyyyy…"
+}
+```
+
+| Campo | Obligatorio | Notas |
+|---|---|---|
+| `agenteId` | sí | Tiene que coincidir con el agente del token (si no, `403`). |
+| `telefono` | sí | Número del contacto. Identifica la conversación. |
+| `mensajeId` | sí | El `mensajeId` que devolvió `POST /mensajes` para el CONTACTO de esta ejecución. |
+
+**Respuesta `200`:**
+
+```json
+{
+  "responder": true,
+  "textoAgrupado": "Hola\n¿Tenés turno para hoy a la noche?",
+  "motivo": null
+}
+```
+
+- `responder: true` → **esta** ejecución sigue: usá `textoAgrupado` como input del
+  AI Agent (en vez del texto de un solo mensaje).
+- `responder: false` → **cortá acá**. Otra ejecución (la del mensaje posterior)
+  responderá por todo el lote, o la conversación quedó en manual. `motivo` puede
+  ser `mensaje_superado` (llegó uno más nuevo) o `conversacion_en_manual`.
+
+**⚠️ Este nodo va SIN retry.** Un reintento podría devolver `responder: true` una
+segunda vez y **duplicar la respuesta**. El diseño no lleva un claim persistente
+a propósito (§11); la no-duplicación se apoya en que el nodo no se reintente.
+
+**No cuenta uso ni cambia estado:** sólo decide. El uso ya se contó en el
+endpoint 2 (dedup por conversación/ciclo), así que agrupar no cuenta de más.
+
+**Errores:** `400`, `401`, `403`, `429`.
+
+---
+
+## Endpoint 4 — Derivar a atención humana ⭐ (SDD v2 §12)
+
+```
+POST /api/integracion/agentes/{agenteId}/derivar
+Content-Type: application/json
+```
+
+Lo llama la **tool `derivar_a_humano` del AI Agent** cuando el bot no puede
+resolver (el cliente pide un humano, pedido fuera de alcance, error). Marca la
+conversación como `REQUIERE_ATENCION_HUMANA`, la pasa a manual (**el bot deja de
+responderle a ese contacto** hasta que el dueño devuelva el control) y, la
+**primera vez**, le manda un WhatsApp al dueño avisándole.
+
+**Cuerpo:**
+
+```json
+{
+  "telefono": "5491144440001",
+  "motivo": "el cliente pide hablar con una persona"
+}
+```
+
+| Campo | Obligatorio | Notas |
+|---|---|---|
+| `telefono` | sí | Número del contacto cuya conversación se deriva. |
+| `motivo` | no | Informativo. **No** se le muestra al dueño (el aviso lleva sólo sede + contacto + link), pero deja rastro de por qué derivó. |
+
+**Respuesta `200`:**
+
+```json
+{ "ok": true, "derivado": true, "notificado": true }
+```
+
+- `derivado`: la conversación quedó en atención humana (siempre `true` si no falló).
+- `notificado`: si se mandó el WhatsApp al dueño. Es `false` si ya se había
+  avisado en este episodio (idempotencia) o si el cliente no tiene número cargado.
+
+**El aviso sale por la instancia de Evolution de esta misma sede** (no hay una
+instancia global). Si el envío falla, la derivación igual queda hecha: el dueño
+lo ve en Conversaciones.
+
+**Comportamiento del bot al derivar:** conviene que en ese mismo turno el bot dé
+un mensaje corto de handoff ("te paso con alguien del equipo") — a partir del
+próximo mensaje ya queda mudo en ese chat. La instrucción va en el system prompt.
+
+**Errores:** `400`, `401`, `403`, `429`.
+
 ---
 
 ## Cómo se ordenan en el workflow
 
 Sobre el workflow madre actual (Webhook → Code/If → AI Agent → HTTP Request a
-Evolution), los 3 llamados se insertan así:
+Evolution), los llamados se insertan así (con la ventana de escucha del §11):
 
 ```
 Webhook (entra el mensaje)
   → Code / If / Transcribe / Edit Fields   (ya normalizás teléfono + texto)
-  → [1] POST /mensajes  { remitente: "CONTACTO" }      ← loguea y cuenta uso
-  → [2] GET  /contexto?telefono=…                      ← ¿sigue? + prompt + precios
-  → If:
-       false → FIN (no se responde; ya quedó logueado para atención humana)
-       true  → AI Agent1  ← system prompt armado con lo que devolvió [2]
-             → HTTP Request  (envía la respuesta por Evolution)
-             → [3] POST /mensajes  { remitente: "IA" } ← loguea la respuesta
+  → [1] POST /mensajes  { remitente: "CONTACTO" }      ← loguea y cuenta uso; devuelve mensajeId
+  → Wait (VENTANA_ESCUCHA_S ≈ 9s)                       ← §11: espera por si llegan más mensajes
+  → [3] POST /mensajes/decidir { mensajeId }            ← ¿respondo yo por el lote? + textoAgrupado
+  → If (responder):
+       false → FIN (otra ejecución responde por todos, o quedó en manual)
+       true  → [2] GET /contexto?telefono=…             ← ¿sigue? + prompt + precios
+             → If (puedeResponder):
+                  false → FIN (logueado para atención humana)
+                  true  → AI Agent1  ← input = textoAgrupado; system prompt de [2]
+                                       (+ tool derivar_a_humano → [4] /derivar)
+                        → HTTP Request  (envía la respuesta por Evolution)
+                        → [2b] POST /mensajes { remitente: "IA" } ← loguea la respuesta
 ```
 
 En el workflow ya cableado, `[2]` es `/puede-responder`. Migrar a `/contexto` es
 cambiar la URL de ese nodo y pasar a leer el prompt de su respuesta en vez de
 tenerlo escrito en el AI Agent.
+
+**Cambios que introduce la ventana de escucha (§11):**
+
+- **`[1]` queda antes del Wait** (posición actual): cada ejecución loguea su
+  mensaje enseguida para que las demás lo vean dentro de la ventana.
+- **El AI Agent deja de leer un solo mensaje** (`{{ $('Vibo - Preparar').first().json.texto }}`)
+  y pasa a leer el texto agrupado (`{{ $('Vibo - Decidir ventana').first().json.textoAgrupado }}`).
+- **`VENTANA_ESCUCHA_S` es una constante del template**, igual para todos los
+  agentes (no configurable por cliente). Vibo no la impone: su lógica sólo compara
+  quién llegó último, así que es agnóstica a la duración exacta.
+
+Los nodos para pegar (Wait, `Vibo - Decidir ventana`, tool `derivar_a_humano`)
+están en **`docs/n8n-nodos-vibo-v3.json`**.
 
 **Por qué [1] va antes de [2]:** el log del mensaje entrante es el que cuenta el
 uso y puede disparar el bloqueo. Poniéndolo antes del chequeo, el mensaje que
@@ -381,6 +510,74 @@ Que la ejecución dé verde no alcanza (ver troubleshooting abajo). Confirmá:
 2. Cambiá un precio en Vibo (Agentes → Canchas), mandá un mensaje y fijate que
    el bot cotice el nuevo.
 3. Pausá el agente en Vibo y confirmá que **no** responde.
+
+---
+
+## Cablear la ventana de escucha y la derivación (v3)
+
+Nodos para pegar en **`docs/n8n-nodos-vibo-v3.json`**. Como siempre, se pegan a
+mano (no se actualiza el workflow por API: descarta credenciales). Reemplazá los
+placeholders `REEMPLAZAR-POR-LA-URL-DE-VIBO` y `REEMPLAZAR-AGENTE-ID`.
+
+### Ventana de escucha (§11) — 4 cambios
+
+1. **Insertar `Vibo - Ventana escucha` (Wait, ~9s) justo después de
+   `Vibo - Log contacto`.** El log del CONTACTO queda **antes** del Wait: cada
+   ejecución loguea su mensaje enseguida para que las demás lo vean.
+2. **Insertar `Vibo - Decidir ventana` (HTTP POST) después del Wait**, y detrás
+   el If `Vibo - ¿Responder ventana?`. Cadena:
+   ```
+   Vibo - Log contacto → Vibo - Ventana escucha → Vibo - Decidir ventana → Vibo - ¿Responder ventana? → (true) Vibo - Contexto → …
+   ```
+   - Va con **`Continue On Fail`** y el If responde si `responder !== false`: si
+     Vibo se cae en este paso, se hace fail-open (todas responden). Preferible un
+     duplicado durante una caída que silencio.
+   - **Este nodo va SIN retry.** Con reintentos activados, un segundo llamado
+     podría devolver `responder: true` y duplicar la respuesta (el diseño no lleva
+     claim persistente a propósito, §11).
+3. **En `AI Agent1`, cambiar el campo *Text*** de
+   `{{ $('Vibo - Preparar').first().json.texto }}` a
+   `{{ $('Vibo - Decidir ventana').first().json.textoAgrupado }}`. Sin esto, el bot
+   contesta un solo mensaje aunque hayas agrupado.
+4. **El If `Vibo - ¿Responder ventana?`** va antes del `Vibo - Contexto`: si
+   `responder` es false, cortás sin llamar al LLM.
+
+### Derivación a atención humana (§12)
+
+- **Conectar la tool `derivar_a_humano` al `AI Agent1`** (entrada *Tool*). Es un
+  HTTP Request Tool que hace `POST /agentes/{id}/derivar`.
+- En el system prompt del agente, sumá una instrucción como: *"Si no podés
+  resolver el pedido (te piden un humano, es un reclamo o algo fuera de tu
+  alcance), usá la herramienta `derivar_a_humano` y avisale al cliente que en un
+  momento lo atiende alguien del equipo."*
+- **Ojo con el `$fromAI` del campo `motivo`** (trampa ya conocida del proyecto):
+  al editarlo en la UI, borrá todo y escribí arrancando con `{{` (no con `=`, que
+  n8n lo agrega), y que la descripción del `$fromAI` sea **texto plano**, nunca
+  una expresión anidada.
+- **Cargá el WhatsApp del dueño en Vibo** (Admin → Cliente → "WhatsApp para
+  avisos"). Sin número, la derivación funciona pero no se avisa a nadie.
+
+### Gotchas que ya nos mordieron (valen igual acá)
+
+- Al pegar en un campo que ya está en modo Expression, n8n conserva el `=` y
+  queda `==...`: pegá **sin** el `=` inicial.
+- Usá `.first()`, no `.item`: el nodo de transcripción puede cortar el rastreo.
+- **Después de pegar un nodo, releé el JSON por MCP `get_workflow_details` y
+  diffealo** contra la fuente: el editor puede truncar líneas largas en silencio.
+- Verificá del lado de Vibo, no sólo que la ejecución dé verde (ver abajo).
+
+### Verificar que quedó bien
+
+1. Mandá **dos mensajes seguidos** del mismo contacto (dentro de la ventana). En
+   Vibo tienen que quedar **los dos** en Conversaciones, y el bot responde **una
+   sola vez**, teniendo en cuenta ambos.
+2. En la salida de `Vibo - Decidir ventana`: la ejecución del primer mensaje da
+   `responder: false` (`mensaje_superado`); la del segundo, `responder: true` con
+   `textoAgrupado` = los dos textos.
+3. Forzá una derivación (pedile al bot hablar con una persona). Confirmá: la
+   conversación queda en **REQUIERE_ATENCION_HUMANA** en Vibo, y **te llega el
+   WhatsApp** al número del dueño. Volvé a pedir lo mismo: la conversación sigue
+   en el estado pero **no** llega un segundo WhatsApp (idempotencia).
 
 ---
 
